@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -Dwarnings
+
+jobs:
+  ci:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --all-features --all-targets -- -D warnings
+
+      - name: Test (all features)
+        run: cargo test --all-features
+
+      - name: Test (no default features)
+        run: cargo test --no-default-features
+
+      - name: Docs
+        run: cargo doc --no-deps --all-features
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  msrv:
+    name: MSRV
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.75"
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --all-features
+
+  pr-checks:
+    name: PR Checks
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: VERSION matches Cargo.toml
+        run: |
+          VERSION_FILE=$(cat VERSION | tr -d '[:space:]')
+          CARGO_VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/version = "\(.*\)".*/\1/')
+          if [ "$VERSION_FILE" != "$CARGO_VERSION" ]; then
+            echo "::error::VERSION file ($VERSION_FILE) does not match Cargo.toml ($CARGO_VERSION)"
+            exit 1
+          fi
+
+      - name: Changelog updated
+        run: |
+          if ! git diff --name-only origin/main...HEAD | grep -q "CHANGELOG.md"; then
+            echo "::warning::CHANGELOG.md was not updated. If this PR has user-facing changes, please add an entry under [Unreleased]."
+          fi
