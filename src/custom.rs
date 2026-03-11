@@ -8,6 +8,11 @@ use crate::expectation::Expectation;
 /// Implement this trait on your own types to create reusable matchers
 /// that work with [`Expectation::to_match`].
 ///
+/// For one-off checks, prefer
+/// [`to_satisfy(predicate, description)`](crate::Expectation::to_satisfy)
+/// which takes a closure. Use `BehaveMatch` when you want a named,
+/// reusable matcher — especially for domain rules used across many tests.
+///
 /// # Examples
 ///
 /// ```

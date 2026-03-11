@@ -59,6 +59,7 @@ src/
     collections.rs               # to_contain, to_be_empty, to_have_length, etc.
     strings.rs                   # to_start_with, to_end_with, etc.
     float.rs                     # to_approximately_equal
+    regex.rs                     # [feature = "regex"] to_match_regex, to_contain_regex
   cli/                           # Behind "cli" feature flag
     mod.rs
     runner.rs                    # Spawns cargo test
@@ -86,7 +87,7 @@ docs/
   ARCHITECTURE.md                # Architecture overview
   RELEASE.md                     # Release process
 
-Feature flags: std (default), cli (cargo-behave binary), tokio (async test generation).
+Feature flags: std (default), cli (cargo-behave binary), color (ANSI diff output), regex (regex matchers), tokio (async test generation).
 ```
 
 The full style guide with all rules, examples, and rationale is in [docs/AGENT.md](docs/AGENT.md).

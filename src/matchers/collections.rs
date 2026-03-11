@@ -22,7 +22,7 @@ impl<T: Debug> Expectation<Vec<T>> {
     /// assert!(result.is_ok());
     /// ```
     pub fn to_be_empty(&self) -> Result<(), MatchError> {
-        self.check(self.value().is_empty(), "empty collection")
+        self.check(self.value().is_empty(), "to be empty")
     }
 
     /// Asserts the collection is not empty.
@@ -40,7 +40,7 @@ impl<T: Debug> Expectation<Vec<T>> {
     /// assert!(result.is_ok());
     /// ```
     pub fn to_not_be_empty(&self) -> Result<(), MatchError> {
-        self.check(!self.value().is_empty(), "non-empty collection")
+        self.check(!self.value().is_empty(), "to not be empty")
     }
 
     /// Asserts the collection has exactly the given length.
@@ -59,16 +59,25 @@ impl<T: Debug> Expectation<Vec<T>> {
     /// ```
     pub fn to_have_length(&self, expected: usize) -> Result<(), MatchError> {
         let actual_len = self.value().len();
-        self.check(actual_len == expected, format!("length {expected}"))
+        self.check(actual_len == expected, format!("to have length {expected}"))
     }
 }
 
 impl<T: Debug + PartialEq> Expectation<Vec<T>> {
     /// Asserts the collection contains the given element.
     ///
+    /// For checking that *all* of several elements are present, use
+    /// [`to_contain_all_of`](Self::to_contain_all_of) instead.
+    ///
     /// # Errors
     ///
     /// Returns [`MatchError`] if the element is not found.
+    ///
+    /// ```text
+    /// expect!(items)
+    ///   actual: [1, 2, 3]
+    /// expected: to contain 9
+    /// ```
     ///
     /// # Examples
     ///
@@ -124,7 +133,7 @@ impl<T: Debug> Expectation<&[T]> {
     /// assert!(result.is_ok());
     /// ```
     pub fn to_be_empty(&self) -> Result<(), MatchError> {
-        self.check(self.value().is_empty(), "empty collection")
+        self.check(self.value().is_empty(), "to be empty")
     }
 
     /// Asserts the slice is not empty.
@@ -143,7 +152,7 @@ impl<T: Debug> Expectation<&[T]> {
     /// assert!(result.is_ok());
     /// ```
     pub fn to_not_be_empty(&self) -> Result<(), MatchError> {
-        self.check(!self.value().is_empty(), "non-empty collection")
+        self.check(!self.value().is_empty(), "to not be empty")
     }
 
     /// Asserts the slice has exactly the given length.
@@ -163,7 +172,7 @@ impl<T: Debug> Expectation<&[T]> {
     /// ```
     pub fn to_have_length(&self, expected: usize) -> Result<(), MatchError> {
         let actual_len = self.value().len();
-        self.check(actual_len == expected, format!("length {expected}"))
+        self.check(actual_len == expected, format!("to have length {expected}"))
     }
 }
 

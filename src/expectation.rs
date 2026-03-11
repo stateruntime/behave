@@ -7,7 +7,13 @@ use crate::error::MatchError;
 /// Wraps a value with metadata for expressive assertions.
 ///
 /// Created by the [`expect!`](crate::expect) macro. Chain matchers to assert
-/// properties of the wrapped value. Use [`.negate()`](Self::negate) to negate.
+/// properties of the wrapped value.
+/// Use [`.not()`](Self::not) or [`.negate()`](Self::negate) to invert any
+/// matcher.
+///
+/// All matchers return `Result<(), MatchError>`, so use `?` to propagate
+/// failures with clear diagnostics showing the expression, actual value,
+/// and expected description.
 ///
 /// # Examples
 ///
@@ -129,13 +135,23 @@ impl<T: fmt::Debug> Expectation<T> {
 
     /// Asserts the value satisfies a predicate.
     ///
-    /// Use this as an escape hatch when no built-in matcher fits.
-    /// The `description` is shown in error messages on failure.
+    /// Use this for one-off checks when no built-in matcher fits.
+    /// For reusable domain rules, consider implementing [`BehaveMatch`](crate::BehaveMatch)
+    /// instead.
+    ///
+    /// The `description` appears in error messages using the standard
+    /// "to ..." format (e.g. `"to be even"`, `"to be positive"`).
     ///
     /// # Errors
     ///
     /// Returns [`MatchError`] if the predicate returns `false`
     /// (or `true` when negated).
+    ///
+    /// ```text
+    /// expect!(count)
+    ///   actual: 7
+    /// expected: to be even
+    /// ```
     ///
     /// # Examples
     ///

@@ -357,6 +357,75 @@ behave! {
     }
 }
 
+#[cfg(feature = "color")]
+mod color_tests {
+    use behave::MatchError;
+
+    #[test]
+    fn color_single_line_contains_structural_content() {
+        let err = MatchError::new("val".to_string(), "42".to_string(), "99".to_string(), false);
+        let msg = err.to_string();
+        assert!(msg.contains("expect!(val)"));
+        assert!(msg.contains("99"));
+        assert!(msg.contains("42"));
+    }
+
+    #[test]
+    fn color_multiline_shows_diff_markers() {
+        let err = MatchError::new(
+            "text".to_string(),
+            "alpha\nbeta\n".to_string(),
+            "alpha\ngamma\n".to_string(),
+            false,
+        );
+        let msg = err.to_string();
+        assert!(msg.contains("--- actual"));
+        assert!(msg.contains("+++ expected"));
+        assert!(msg.contains("-gamma"));
+        assert!(msg.contains("+beta"));
+        assert!(msg.contains(" alpha"));
+    }
+
+    #[test]
+    fn color_multiline_negated_uses_single_line_format() {
+        let err = MatchError::new(
+            "text".to_string(),
+            "a\nb\n".to_string(),
+            "a\nb\n".to_string(),
+            true,
+        );
+        let msg = err.to_string();
+        // Negated always uses single-line format, even for multiline values
+        assert!(msg.contains("expected: not"));
+        assert!(!msg.contains("---"));
+    }
+}
+
+#[cfg(feature = "regex")]
+mod regex_tests {
+    use behave::prelude::*;
+
+    behave! {
+        "regex matchers" {
+            "to_match_regex full match" {
+                expect!("hello123").to_match_regex(r"hello\d+")?;
+            }
+
+            "to_match_regex rejects partial" {
+                expect!("abc123def").negate().to_match_regex(r"\d+")?;
+            }
+
+            "to_contain_regex finds substring" {
+                expect!("abc123def").to_contain_regex(r"\d+")?;
+            }
+
+            "to_contain_regex no match" {
+                expect!("hello").negate().to_contain_regex(r"\d+")?;
+            }
+        }
+    }
+}
+
 #[cfg(feature = "tokio")]
 mod async_tests {
     use behave::prelude::*;
@@ -423,6 +492,42 @@ mod panic_macros {
                 expect_no_panic!({
                     let _ = 1 + 1;
                 })?;
+            }
+        }
+    }
+}
+
+mod common;
+
+/// Demonstrates importing shared helpers from `tests/common/mod.rs`.
+///
+/// The `mod common;` import brings in shared types, matchers, and helpers.
+/// Inside the `behave!` block, each group generates `use super::*;` so
+/// the common items propagate through all nesting levels.
+mod shared_imports {
+    use behave::prelude::*;
+    use crate::common::{double, IsOrigin, Point};
+
+    behave! {
+        "shared imports" {
+            "uses helper from common" {
+                expect!(double(21)).to_equal(42)?;
+            }
+
+            "uses shared type from common" {
+                let p = Point::new(3, 4);
+                expect!(p).to_equal(Point::new(3, 4))?;
+            }
+
+            "uses custom matcher from common" {
+                let origin = Point::origin();
+                expect!(origin).to_match(IsOrigin)?;
+            }
+
+            "nested group inherits imports" {
+                "still has access to shared helpers" {
+                    expect!(double(5)).to_equal(10)?;
+                }
             }
         }
     }

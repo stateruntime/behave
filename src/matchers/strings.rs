@@ -10,6 +10,12 @@ impl<T: AsRef<str> + core::fmt::Debug> Expectation<T> {
     ///
     /// Returns [`MatchError`] if the string does not start with the prefix.
     ///
+    /// ```text
+    /// expect!(greeting)
+    ///   actual: "goodbye world"
+    /// expected: to start with "hello"
+    /// ```
+    ///
     /// # Examples
     ///
     /// ```
@@ -66,9 +72,9 @@ impl<T: AsRef<str> + core::fmt::Debug> Expectation<T> {
 
     /// Asserts the string has exactly the given byte length.
     ///
-    /// Note: this measures byte length (`str::len`), not character count.
-    /// For multi-byte characters, byte length will differ from the number
-    /// of Unicode scalar values.
+    /// Measures byte length ([`str::len`]), not character count. For ASCII
+    /// strings, byte length equals character count. For multi-byte
+    /// characters (e.g. emoji), byte length will be larger.
     ///
     /// # Errors
     ///
@@ -79,14 +85,20 @@ impl<T: AsRef<str> + core::fmt::Debug> Expectation<T> {
     /// ```
     /// use behave::Expectation;
     ///
+    /// // ASCII: 1 byte per character
     /// let result = Expectation::new("abc", "s")
     ///     .to_have_str_length(3);
+    /// assert!(result.is_ok());
+    ///
+    /// // Emoji: 4 bytes each
+    /// let result = Expectation::new("\u{1F600}\u{1F601}", "s")
+    ///     .to_have_str_length(8);
     /// assert!(result.is_ok());
     /// ```
     pub fn to_have_str_length(&self, expected: usize) -> Result<(), MatchError> {
         let actual_len = self.value().as_ref().len();
         let is_match = actual_len == expected;
-        self.check(is_match, format!("length {expected}"))
+        self.check(is_match, format!("to have length {expected}"))
     }
 }
 

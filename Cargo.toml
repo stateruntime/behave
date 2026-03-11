@@ -1,12 +1,12 @@
 [package]
 name = "behave"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 rust-version = "1.75"
 license = "Apache-2.0"
 repository = "https://github.com/stateruntime/behave"
 homepage = "https://github.com/stateruntime/behave"
-description = "A BDD testing framework for Rust you will just love to work with."
+description = "BDD testing framework with expressive expect! matchers and a zero-keyword DSL."
 documentation = "https://docs.rs/behave"
 readme = "README.md"
 keywords = ["testing", "bdd", "test", "expect", "matcher"]
@@ -16,14 +16,18 @@ categories = ["development-tools::testing"]
 default = ["std"]
 std = []
 cli = ["dep:clap", "dep:crossterm", "dep:serde", "dep:serde_json", "dep:toml"]
+color = ["std", "dep:similar"]
+regex = ["dep:regex"]
 tokio = ["dep:tokio"]
 
 [dependencies]
-behave-macros = { path = "macros", version = "0.2.0" }
+behave-macros = { path = "macros", version = "0.3.0" }
 clap = { version = "4", features = ["derive"], optional = true }
 crossterm = { version = "0.28", optional = true }
+regex = { version = "1", optional = true, default-features = false, features = ["std", "unicode-perl"] }
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
+similar = { version = "2", optional = true }
 tokio = { version = "1", features = ["macros", "rt"], optional = true }
 toml = { version = "0.8", optional = true }
 
@@ -56,3 +60,7 @@ print_stdout = "deny"
 print_stderr = "deny"
 module_name_repetitions = "allow"
 must_use_candidate = "allow"
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]

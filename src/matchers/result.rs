@@ -8,9 +8,18 @@ use crate::expectation::Expectation;
 impl<T: Debug, E: Debug> Expectation<Result<T, E>> {
     /// Asserts the result is `Ok`.
     ///
+    /// Use [`to_be_ok_with`](Expectation::to_be_ok_with) when you also
+    /// need to check the inner value.
+    ///
     /// # Errors
     ///
     /// Returns [`MatchError`] if the value is `Err` (or `Ok` when negated).
+    ///
+    /// ```text
+    /// expect!(response)
+    ///   actual: Err("not found")
+    /// expected: to be Ok(_)
+    /// ```
     ///
     /// # Examples
     ///
@@ -22,7 +31,7 @@ impl<T: Debug, E: Debug> Expectation<Result<T, E>> {
     /// assert!(result.is_ok());
     /// ```
     pub fn to_be_ok(&self) -> Result<(), MatchError> {
-        self.check(self.value().is_ok(), "Ok(_)")
+        self.check(self.value().is_ok(), "to be Ok(_)")
     }
 
     /// Asserts the result is `Err`.
@@ -41,7 +50,7 @@ impl<T: Debug, E: Debug> Expectation<Result<T, E>> {
     /// assert!(result.is_ok());
     /// ```
     pub fn to_be_err(&self) -> Result<(), MatchError> {
-        self.check(self.value().is_err(), "Err(_)")
+        self.check(self.value().is_err(), "to be Err(_)")
     }
 }
 
@@ -64,7 +73,7 @@ impl<T: Debug + PartialEq, E: Debug> Expectation<Result<T, E>> {
     #[allow(clippy::needless_pass_by_value)]
     pub fn to_be_ok_with(&self, expected: T) -> Result<(), MatchError> {
         let is_match = self.value().as_ref().is_ok_and(|val| *val == expected);
-        self.check(is_match, format!("Ok({expected:?})"))
+        self.check(is_match, format!("to be Ok({expected:?})"))
     }
 }
 
@@ -87,7 +96,7 @@ impl<T: Debug, E: Debug + PartialEq> Expectation<Result<T, E>> {
     #[allow(clippy::needless_pass_by_value)]
     pub fn to_be_err_with(&self, expected: E) -> Result<(), MatchError> {
         let is_match = self.value().as_ref().is_err_and(|err| *err == expected);
-        self.check(is_match, format!("Err({expected:?})"))
+        self.check(is_match, format!("to be Err({expected:?})"))
     }
 }
 

@@ -19,7 +19,7 @@ impl Expectation<bool> {
     /// assert!(result.is_ok());
     /// ```
     pub fn to_be_true(&self) -> Result<(), MatchError> {
-        self.check(*self.value(), "true")
+        self.check(*self.value(), "to be true")
     }
 
     /// Asserts the value is `false`.
@@ -37,7 +37,7 @@ impl Expectation<bool> {
     /// assert!(result.is_ok());
     /// ```
     pub fn to_be_false(&self) -> Result<(), MatchError> {
-        self.check(!*self.value(), "false")
+        self.check(!*self.value(), "to be false")
     }
 }
 

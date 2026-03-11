@@ -9,14 +9,22 @@ macro_rules! impl_float_matchers {
             /// Asserts the value is approximately equal to the expected value.
             ///
             #[doc = concat!("Uses a default epsilon of `", $suffix, "`.")]
+            /// Use [`to_approximately_equal_within`](Self::to_approximately_equal_within)
+            /// for a custom epsilon.
             ///
-            /// NaN values never compare as approximately equal (even to
-            /// themselves). Infinity minus infinity produces NaN, so
-            /// `INFINITY.to_approximately_equal(INFINITY)` fails.
+            /// `NaN` values never compare as approximately equal (even to
+            /// themselves). `INFINITY - INFINITY` produces `NaN`, so
+            /// `INFINITY.to_approximately_equal(INFINITY)` also fails.
             ///
             /// # Errors
             ///
             /// Returns [`MatchError`] if the difference exceeds the epsilon.
+            ///
+            /// ```text
+            /// expect!(measurement)
+            ///   actual: 1.5
+            /// expected: to approximately equal 2.0 (within 0.0000000001)
+            /// ```
             ///
             /// # Examples
             ///
@@ -58,7 +66,7 @@ macro_rules! impl_float_matchers {
                 let is_match = diff <= epsilon;
                 self.check(
                     is_match,
-                    format!("{expected} (within {epsilon})"),
+                    format!("to approximately equal {expected} (within {epsilon})"),
                 )
             }
         }

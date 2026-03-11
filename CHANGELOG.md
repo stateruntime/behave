@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0]
+
+### Added
+
+- `color` feature flag for enhanced assertion failure output
+  - Single-line values: red for actual, green for expected
+  - Multiline values: line-by-line diff with `+`/`-` markers via the `similar` crate
+  - Respects `NO_COLOR` environment variable per <https://no-color.org/>
+  - Structured diff format preserved even when `NO_COLOR` disables ANSI codes
+- `regex` feature flag with two new string matchers
+  - `to_match_regex(pattern)` — full-string match (auto-anchored with `^(?:...)$`)
+  - `to_contain_regex(pattern)` — substring match (unanchored)
+  - Invalid regex patterns produce `MatchError` instead of panicking
+
 ## [0.2.0]
 
 ### Added

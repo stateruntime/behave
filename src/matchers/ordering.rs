@@ -7,11 +7,19 @@ use crate::expectation::Expectation;
 
 #[allow(clippy::needless_pass_by_value)]
 impl<T: PartialOrd + Debug> Expectation<T> {
-    /// Asserts the value is greater than the given bound.
+    /// Asserts the value is strictly greater than the given bound.
+    ///
+    /// Use [`to_be_at_least`](Self::to_be_at_least) for `>=`.
     ///
     /// # Errors
     ///
-    /// Returns [`MatchError`] if the comparison fails.
+    /// Returns [`MatchError`] if the value is less than or equal to the bound.
+    ///
+    /// ```text
+    /// expect!(count)
+    ///   actual: 3
+    /// expected: to be greater than 5
+    /// ```
     ///
     /// # Examples
     ///
@@ -23,7 +31,7 @@ impl<T: PartialOrd + Debug> Expectation<T> {
     /// ```
     pub fn to_be_greater_than(&self, bound: T) -> Result<(), MatchError> {
         let is_match = *self.value() > bound;
-        self.check(is_match, format!("greater than {bound:?}"))
+        self.check(is_match, format!("to be greater than {bound:?}"))
     }
 
     /// Asserts the value is less than the given bound.
@@ -42,7 +50,7 @@ impl<T: PartialOrd + Debug> Expectation<T> {
     /// ```
     pub fn to_be_less_than(&self, bound: T) -> Result<(), MatchError> {
         let is_match = *self.value() < bound;
-        self.check(is_match, format!("less than {bound:?}"))
+        self.check(is_match, format!("to be less than {bound:?}"))
     }
 
     /// Asserts the value is greater than or equal to the given bound.
@@ -61,7 +69,7 @@ impl<T: PartialOrd + Debug> Expectation<T> {
     /// ```
     pub fn to_be_at_least(&self, bound: T) -> Result<(), MatchError> {
         let is_match = *self.value() >= bound;
-        self.check(is_match, format!("at least {bound:?}"))
+        self.check(is_match, format!("to be at least {bound:?}"))
     }
 
     /// Asserts the value is less than or equal to the given bound.
@@ -80,7 +88,7 @@ impl<T: PartialOrd + Debug> Expectation<T> {
     /// ```
     pub fn to_be_at_most(&self, bound: T) -> Result<(), MatchError> {
         let is_match = *self.value() <= bound;
-        self.check(is_match, format!("at most {bound:?}"))
+        self.check(is_match, format!("to be at most {bound:?}"))
     }
 }
 

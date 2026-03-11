@@ -39,6 +39,7 @@ src/
   expectation.rs      # Expectation<T> - wraps values for matcher chains
   custom.rs           # BehaveMatch<T> trait for user-defined matchers
   matchers/           # Built-in matcher implementations (one file per category)
+    regex.rs          # [feature = "regex"] to_match_regex, to_contain_regex
   cli/                # [feature = "cli"] cargo-behave binary support
     config.rs         # BehaveConfig - behave.toml parsing
     context.rs        # Workspace/package resolution via cargo metadata
@@ -133,6 +134,8 @@ Ideas that may be revisited in the future:
 | `crossterm` | Terminal colors (optional, `cli` feature) |
 | `serde` | Serialization for config and history (optional, `cli` feature) |
 | `serde_json` | JSON history file format and JSON report output (optional, `cli` feature) |
+| `regex` | Regex engine for pattern matching (optional, `regex` feature) |
+| `similar` | Text diffing for colored output (optional, `color` feature) |
 | `tokio` | Async test runtime (optional, `tokio` feature) |
 | `toml` | TOML config file parsing (optional, `cli` feature) |
 
@@ -142,4 +145,6 @@ Ideas that may be revisited in the future:
 |---------|---------|---------|
 | `std` | Yes | Standard library support |
 | `cli` | No | Enables `cargo-behave` binary with flaky detection and report output |
+| `color` | No | ANSI-colored diff output for assertion failures (requires `std`) |
+| `regex` | No | `to_match_regex` and `to_contain_regex` string matchers |
 | `tokio` | No | Re-exports `tokio` for `tokio;` async test generation |

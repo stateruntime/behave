@@ -8,9 +8,18 @@ use crate::expectation::Expectation;
 impl<T: Debug> Expectation<Option<T>> {
     /// Asserts the option is `Some`.
     ///
+    /// Use [`to_be_some_with`](Expectation::to_be_some_with) when you also
+    /// need to check the inner value.
+    ///
     /// # Errors
     ///
     /// Returns [`MatchError`] if the value is `None` (or `Some` when negated).
+    ///
+    /// ```text
+    /// expect!(result)
+    ///   actual: None
+    /// expected: to be Some(_)
+    /// ```
     ///
     /// # Examples
     ///
@@ -21,7 +30,7 @@ impl<T: Debug> Expectation<Option<T>> {
     /// assert!(result.is_ok());
     /// ```
     pub fn to_be_some(&self) -> Result<(), MatchError> {
-        self.check(self.value().is_some(), "Some(_)")
+        self.check(self.value().is_some(), "to be Some(_)")
     }
 
     /// Asserts the option is `None`.
@@ -39,7 +48,7 @@ impl<T: Debug> Expectation<Option<T>> {
     /// assert!(result.is_ok());
     /// ```
     pub fn to_be_none(&self) -> Result<(), MatchError> {
-        self.check(self.value().is_none(), "None")
+        self.check(self.value().is_none(), "to be None")
     }
 }
 
@@ -61,7 +70,7 @@ impl<T: Debug + PartialEq> Expectation<Option<T>> {
     #[allow(clippy::needless_pass_by_value)]
     pub fn to_be_some_with(&self, expected: T) -> Result<(), MatchError> {
         let is_match = self.value().as_ref() == Some(&expected);
-        self.check(is_match, format!("Some({expected:?})"))
+        self.check(is_match, format!("to be Some({expected:?})"))
     }
 }
 
