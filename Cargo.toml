@@ -1,6 +1,7 @@
 [package]
 name = "behave"
 version = "0.4.1"
+authors = ["Jan Piotrzkowski <https://github.com/babilonczyk>", "State Runtime <https://github.com/stateruntime>"]
 edition = "2021"
 rust-version = "1.75"
 license = "Apache-2.0"
@@ -9,6 +10,22 @@ homepage = "https://github.com/stateruntime/behave"
 description = "BDD testing framework with expressive expect! matchers and a zero-keyword DSL."
 documentation = "https://docs.rs/behave"
 readme = "README.md"
+exclude = [
+  ".github/",
+  ".editorconfig",
+  "CLAUDE.md",
+  "CONTRIBUTING.md",
+  "SECURITY.md",
+  "deny.toml",
+  "justfile",
+  "rust-toolchain.toml",
+  "rustfmt.toml",
+  "scripts/",
+  "docs/AGENT.md",
+  "docs/RELEASE.md",
+  "docs/feature_competition.md",
+  "tests/",
+]
 keywords = ["testing", "bdd", "test", "expect", "matcher"]
 categories = ["development-tools::testing"]
 
@@ -21,7 +38,7 @@ regex = ["dep:regex"]
 tokio = ["dep:tokio"]
 
 [dependencies]
-behave-macros = { path = "macros", version = "0.4.0" }
+behave-macros = { path = "macros", version = "0.4.1" }
 clap = { version = "4", features = ["derive"], optional = true }
 crossterm = { version = "0.28", optional = true }
 regex = { version = "1", optional = true, default-features = false, features = ["std", "unicode-perl"] }

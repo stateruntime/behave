@@ -50,12 +50,19 @@ git push origin main v1.2.0
 The `v*` tag triggers `.github/workflows/release.yml` which:
 1. Validates the tag matches the VERSION file
 2. Runs the full test suite
-3. Publishes `behave` to crates.io (requires `CARGO_REGISTRY_TOKEN` secret)
-4. Creates a GitHub Release with notes extracted from CHANGELOG.md
+3. Publishes `behave-macros` to crates.io first (required dependency)
+4. Waits for the crates.io index to update
+5. Publishes `behave` to crates.io
+6. Creates a GitHub Release with notes extracted from CHANGELOG.md
 
-The `behave-macros` subcrate is not published separately - it is included as a path dependency.
+Both crates require the `CARGO_REGISTRY_TOKEN` secret. The `behave-macros` proc-macro subcrate **must** be published before the main `behave` crate, since cargo strips `path =` during publish and resolves the version from the registry.
 
-If you haven't set up the crates.io token yet, publish manually: `cargo publish`
+If publishing manually, run in order:
+```bash
+cargo publish -p behave-macros
+sleep 30  # wait for crates.io index
+cargo publish
+```
 
 ## Version Bump Rules (SemVer)
 

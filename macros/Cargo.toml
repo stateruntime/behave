@@ -1,14 +1,18 @@
 [package]
 name = "behave-macros"
-version = "0.4.0"
+version = "0.4.1"
+authors = ["Jan Piotrzkowski <https://github.com/babilonczyk>", "State Runtime <https://github.com/stateruntime>"]
 edition = "2021"
 rust-version = "1.75"
 license = "Apache-2.0"
 repository = "https://github.com/stateruntime/behave"
 homepage = "https://github.com/stateruntime/behave"
 description = "Proc macros for the behave BDD testing framework"
+documentation = "https://docs.rs/behave"
 readme = "../README.md"
-publish = false
+keywords = ["testing", "bdd", "proc-macro", "test", "macro"]
+categories = ["development-tools::testing"]
+exclude = ["tests/", "benches/"]
 
 [lib]
 proc-macro = true

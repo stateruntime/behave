@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Enable `behave-macros` publishing to crates.io (previously had `publish = false`)
+- Add `exclude` patterns to both crate manifests to reduce package size
+- Release workflow now publishes `behave-macros` before the main crate
+
 ## [0.4.1]
 
 ### Fixed
