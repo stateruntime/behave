@@ -12,7 +12,7 @@ documentation = "https://docs.rs/behave"
 readme = "../README.md"
 keywords = ["testing", "bdd", "proc-macro", "test", "macro"]
 categories = ["development-tools::testing"]
-exclude = ["tests/", "benches/"]
+exclude = ["tests/", "benches/", "target/"]
 
 [lib]
 proc-macro = true
