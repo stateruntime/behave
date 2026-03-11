@@ -32,14 +32,14 @@ Add a fresh `[Unreleased]` section above it. Update comparison links at the bott
 ### 3. Pre-release checks
 
 ```bash
-just check              # fmt, clippy, test, doc
+just check              # fmt, clippy, test, doc, markdown guides, CLI fixture
 cargo publish --dry-run # verify it can be packaged
 ```
 
 ### 4. Commit and tag
 
 ```bash
-git add VERSION Cargo.toml CHANGELOG.md
+git add VERSION Cargo.toml macros/Cargo.toml CHANGELOG.md
 git commit -m "chore: release v1.2.0"
 git tag v1.2.0
 git push origin main v1.2.0
@@ -50,8 +50,10 @@ git push origin main v1.2.0
 The `v*` tag triggers `.github/workflows/release.yml` which:
 1. Validates the tag matches the VERSION file
 2. Runs the full test suite
-3. Publishes to crates.io (requires `CARGO_REGISTRY_TOKEN` secret)
+3. Publishes `behave` to crates.io (requires `CARGO_REGISTRY_TOKEN` secret)
 4. Creates a GitHub Release with notes extracted from CHANGELOG.md
+
+The `behave-macros` subcrate is not published separately - it is included as a path dependency.
 
 If you haven't set up the crates.io token yet, publish manually: `cargo publish`
 

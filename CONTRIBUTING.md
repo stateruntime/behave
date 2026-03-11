@@ -5,10 +5,10 @@ Thank you for your interest in contributing!
 ## Getting Started
 
 1. Fork the repository
-2. Clone your fork: `git clone https://github.com/your-username/crate-name.git`
+2. Clone your fork: `git clone https://github.com/your-username/behave.git`
 3. Create a feature branch: `git checkout -b feat/your-feature`
 4. Make your changes
-5. Run checks: `cargo fmt --check && cargo clippy --all-features -- -D warnings && cargo test --all-features`
+5. Run checks: `cargo fmt --all -- --check && cargo clippy --all-features --all-targets -- -D warnings && cargo test --all-features`
 6. Commit (see [Commit Messages](#commit-messages))
 7. Push and open a pull request
 
@@ -17,10 +17,10 @@ Optionally install [just](https://github.com/casey/just) to run all checks with 
 ## Development
 
 ```bash
-cargo build              # Build
-cargo test --all-features # Test
-cargo clippy --all-features -- -D warnings # Lint
-cargo fmt                # Format
+cargo build                      # Build
+cargo test --all-features        # Test
+cargo clippy --all-features --all-targets -- -D warnings  # Lint
+cargo fmt --all                  # Format
 ```
 
 ## Commit Messages
@@ -38,7 +38,7 @@ Types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `chore`, `ci`
 1. **Update CHANGELOG.md** under `[Unreleased]` if your change is user-facing. CI will warn if you forget.
 2. Add tests for new functionality.
 3. All CI checks pass.
-4. Keep PRs focused — one logical change per PR.
+4. Keep PRs focused - one logical change per PR.
 
 ## Code Style
 

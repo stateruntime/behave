@@ -1,0 +1,4 @@
+[flaky_detection]
+enabled = true
+history_file = "target/behave/history.json"
+consecutive_passes = 2

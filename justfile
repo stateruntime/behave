@@ -3,7 +3,7 @@
 # Usage: just <recipe>
 
 # Run all checks (mirrors CI)
-check: fmt-check clippy test doc
+check: fmt-check clippy test doc markdown-docs cli-fixture
 
 # Format code
 fmt:
@@ -24,6 +24,14 @@ test:
 # Build documentation
 doc:
     RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features
+
+# Test markdown guides and README snippets
+markdown-docs:
+    bash scripts/test-markdown-docs.sh
+
+# Run the end-to-end CLI fixture check
+cli-fixture:
+    bash scripts/test-cli-fixture.sh
 
 # Quick dev check (fastest feedback loop)
 dev:
@@ -51,6 +59,7 @@ release:
     set -euo pipefail
     VERSION=$(cat VERSION | tr -d '[:space:]')
     echo "Preparing release v${VERSION}..."
-    sed -i '' "s/^version = \".*\"/version = \"${VERSION}\"/" Cargo.toml
+    sed -i '' "s/^version = \".*\"/version = \"${VERSION}\"/" Cargo.toml 2>/dev/null || true
+    sed -i '' "s/^version = \".*\"/version = \"${VERSION}\"/" macros/Cargo.toml 2>/dev/null || true
     cargo check
     echo "Ready. Review changes, commit, and tag with: git tag v${VERSION}"

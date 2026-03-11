@@ -1,0 +1,8 @@
+[package]
+name = "cli-fixture-domain"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dev-dependencies]
+behave = { path = "__BEHAVE_PATH__" }

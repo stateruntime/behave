@@ -37,6 +37,12 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
 
+      - name: Markdown Docs
+        run: bash scripts/test-markdown-docs.sh
+
+      - name: CLI Fixture
+        run: bash scripts/test-cli-fixture.sh
+
   msrv:
     name: MSRV
     runs-on: ubuntu-latest

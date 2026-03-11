@@ -1,33 +1,43 @@
 [package]
-name = "crate-name"
-version = "0.1.0" # keep in sync with VERSION file (single source of truth)
+name = "behave"
+version = "0.1.0"
 edition = "2021"
 rust-version = "1.75"
-description = "A short description of what this crate does."
 license = "Apache-2.0"
-repository = "https://github.com/username/crate-name"
-homepage = "https://github.com/username/crate-name"
-documentation = "https://docs.rs/crate-name"
+repository = "https://github.com/stateruntime/behave"
+homepage = "https://github.com/stateruntime/behave"
+description = "A BDD testing framework for Rust you will just love to work with."
+documentation = "https://docs.rs/behave"
 readme = "README.md"
-keywords = []
-categories = []
+keywords = ["testing", "bdd", "test", "expect", "matcher"]
+categories = ["development-tools::testing"]
 
 [features]
 default = ["std"]
 std = []
-# Optional integrations — use dep: syntax to avoid implicit feature names
-# serde = ["dep:serde"]
-# async = ["dep:tokio"]
+cli = ["dep:clap", "dep:crossterm", "dep:serde", "dep:serde_json", "dep:toml"]
+tokio = ["dep:tokio"]
 
 [dependencies]
-# serde = { version = "1", features = ["derive"], optional = true }
-# tokio = { version = "1", optional = true }
+behave-macros = { path = "macros", version = "0.1.0" }
+clap = { version = "4", features = ["derive"], optional = true }
+crossterm = { version = "0.28", optional = true }
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
+tokio = { version = "1", features = ["macros", "rt"], optional = true }
+toml = { version = "0.8", optional = true }
 
 [dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }
+
+[[bin]]
+name = "cargo-behave"
+path = "src/bin/cargo-behave.rs"
+required-features = ["cli"]
 
 [lints.rust]
 unsafe_code = "forbid"
-missing_docs = "warn"
+missing_docs = "deny"
 unreachable_pub = "warn"
 rust_2018_idioms = { level = "warn", priority = -1 }
 missing_debug_implementations = "warn"
@@ -36,7 +46,6 @@ missing_debug_implementations = "warn"
 all = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 nursery = { level = "warn", priority = -1 }
-# Specific high-value denials
 unwrap_used = "deny"
 expect_used = "deny"
 panic = "deny"
@@ -45,6 +54,5 @@ todo = "deny"
 dbg_macro = "deny"
 print_stdout = "deny"
 print_stderr = "deny"
-# Allow pedantic lints that are too noisy
 module_name_repetitions = "allow"
 must_use_candidate = "allow"

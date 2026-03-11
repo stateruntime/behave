@@ -15,7 +15,7 @@ Maintainability is about the humans who will read and change the code, not about
 - Keep logic **flat and linear**: guard clauses + small functions.
 - Prefer **duplication over the wrong abstraction**.
 - Every `pub` item is a promise. Think before making something public.
-- If a reviewer asks "what does this do?", the code is too clever — rewrite it.
+- If a reviewer asks "what does this do?", the code is too clever - rewrite it.
 
 **What boring means in practice:**
 
@@ -69,7 +69,7 @@ crate-name/
 - Keep private implementation details private (no visibility modifier).
 
 ```rust
-// lib.rs — the public face
+// lib.rs - the public face
 mod parser;
 mod config;
 mod error;
@@ -105,10 +105,10 @@ impl Storage for FileStorage { /* ... */ }
 
 ### Cohesion Over Convenience
 
-Every module must have **functional cohesion** — all items contribute to a single, well-defined task.
+Every module must have **functional cohesion** - all items contribute to a single, well-defined task.
 
 ```rust
-// BAD: Coincidental cohesion — a junk drawer
+// BAD: Coincidental cohesion - a junk drawer
 mod utils {
     pub fn format_date() { ... }
     pub fn connect_to_db() { ... }
@@ -140,7 +140,7 @@ mod tax {
 
 ## 4. Naming
 
-Poor naming is the #1 source of cognitive overhead. Good naming is not cosmetic — it is design.
+Poor naming is the #1 source of cognitive overhead. Good naming is not cosmetic - it is design.
 
 ### Conventions Table
 
@@ -170,9 +170,9 @@ Poor naming is the #1 source of cognitive overhead. Good naming is not cosmetic 
 
 **1. Names reveal intent, not implementation.**
 ```rust
-// Bad — reveals implementation
+// Bad - reveals implementation
 let elapsed_time_in_ms: u64 = 0;
-// Good — reveals intent
+// Good - reveals intent
 let request_timeout_ms: u64 = 0;
 ```
 
@@ -200,9 +200,9 @@ is_visible, has_children, can_edit, was_deleted, should_retry
 
 **5. Function names describe what they DO, not how.**
 ```rust
-// Bad — describes mechanism
+// Bad - describes mechanism
 fn string_to_config_object(s: &str) -> Config { ... }
-// Good — describes purpose
+// Good - describes purpose
 fn parse_config(s: &str) -> Config { ... }
 ```
 
@@ -224,12 +224,12 @@ A function named `get_*` must not mutate state. A function named `is_*` must not
 
 If you need a comment to explain what a block does, extract it into a named function.
 
-### Guard Clauses — No Nesting
+### Guard Clauses - No Nesting
 
 Prefer early returns. The happy path flows downward. Never nest deeper than 3 levels.
 
 ```rust
-// BAD: Deep nesting — reader must mentally track 4+ branches
+// BAD: Deep nesting - reader must mentally track 4+ branches
 fn process(data: &[u8], config: &Config) -> Result<Output, Error> {
     if let Some(header) = parse_header(data) {
         if header.version == 2 {
@@ -299,7 +299,7 @@ fn checkout(order: &Order) -> Result<(), Error> {
 
 ### Command/Query Separation
 
-A function should either **do something** (command) or **answer something** (query) — never both.
+A function should either **do something** (command) or **answer something** (query) - never both.
 
 ```rust
 // BAD: Named like a query but mutates state
@@ -332,10 +332,10 @@ render_button("Submit", ButtonStyle::Primary); // obvious
 
 ### Library Error Contract
 
-- Implement `Display` and `std::error::Error` manually — no derive macros for errors.
+- Implement `Display` and `std::error::Error` manually - no derive macros for errors.
 - Define one crate-level `Error` enum (or a small set of domain errors).
 - Mark all public error enums `#[non_exhaustive]`.
-- Never `unwrap()`, `expect()`, or `panic!()` in library code — propagate with `?`.
+- Never `unwrap()`, `expect()`, or `panic!()` in library code - propagate with `?`.
 - Reserve `unwrap()` for tests only.
 - Error messages: lowercase, no trailing punctuation (they chain: "failed to parse: invalid header").
 
@@ -378,12 +378,15 @@ impl From<std::io::Error> for ParseError {
 Include enough context to diagnose without a debugger. Include the input that caused the failure:
 
 ```rust
-#[error("failed to read config file at {}", path.display())]
+// Manual Display impl with context
 ReadFile {
     path: PathBuf,
-    #[source]
     cause: std::io::Error,
-},
+}
+
+// In the Display impl:
+// Self::ReadFile { path, .. } =>
+//     write!(f, "failed to read config file at {}", path.display())
 ```
 
 ### When to Use What
@@ -446,7 +449,7 @@ impl Email {
     pub fn as_str(&self) -> &str { &self.0 }
 }
 
-// Cannot receive an invalid email — the type guarantees it
+// Cannot receive an invalid email - the type guarantees it
 fn send_notification(email: &Email, message: &str) -> Result<(), Error> { ... }
 ```
 
@@ -466,10 +469,10 @@ pub fn speed(distance: Meters, time: Seconds) -> MetersPerSecond { ... }
 ### Enums Over Booleans
 
 ```rust
-// BAD — what does `true` mean?
+// BAD - what does `true` mean?
 fn connect(addr: &str, use_tls: bool) { ... }
 
-// GOOD — self-documenting
+// GOOD - self-documenting
 pub enum Transport { Plain, Tls }
 fn connect(addr: &str, transport: Transport) { ... }
 ```
@@ -532,7 +535,7 @@ pub trait OrderRepository {
 
 ### Bad Abstractions
 
-**Leaky** — exposes internals through the interface:
+**Leaky** - exposes internals through the interface:
 ```rust
 // Leaky: caller must know about SQL
 pub trait Repository {
@@ -540,7 +543,7 @@ pub trait Repository {
 }
 ```
 
-**Premature** — one implementation behind a trait/factory:
+**Premature** - one implementation behind a trait/factory:
 ```rust
 // Premature: only one shipping calculator exists. Just use a function.
 trait ShippingCalculator { fn calculate(&self, ...) -> f64; }
@@ -549,7 +552,7 @@ impl ShippingCalculator for StandardShipping { ... }
 struct ShippingCalculatorFactory;
 ```
 
-**Speculative generality** — code for hypothetical future needs:
+**Speculative generality** - code for hypothetical future needs:
 ```rust
 // Nobody asked for plugins. No plugins exist. This is dead weight.
 pub trait PluginRegistry { ... }
@@ -597,13 +600,13 @@ Global mutable state               → very dangerous
 **3. Pass state explicitly.** All inputs are parameters, all outputs are return values.
 
 ```rust
-// BAD: Implicit state — must call methods in order, state bleeds between calls
+// BAD: Implicit state - must call methods in order, state bleeds between calls
 struct Processor {
     current_user: Option<User>,  // must be set before process()
     last_result: Option<Output>, // carries over between calls!
 }
 
-// GOOD: Explicit state — each call is self-contained
+// GOOD: Explicit state - each call is self-contained
 fn process(user: &User, input: &Input) -> Result<Output, Error> { ... }
 ```
 
@@ -633,17 +636,17 @@ pub fn save_config(config: &Config, writer: &mut impl Write) -> Result<(), Error
 
 ### Minimize Coupling
 
-**Best:** Message coupling — communicates only through well-defined interfaces (traits).
-**Worst:** Content coupling — reaching into another module's private state.
+**Best:** Message coupling - communicates only through well-defined interfaces (traits).
+**Worst:** Content coupling - reaching into another module's private state.
 
 ```rust
-// BAD: Tight coupling — knows about internal fields
+// BAD: Tight coupling - knows about internal fields
 fn process(engine: &mut Engine) {
     engine.internal_buffer.clear(); // reaching into internals
     engine.state = EngineState::Ready; // modifying private state
 }
 
-// GOOD: Loose coupling — uses public interface
+// GOOD: Loose coupling - uses public interface
 fn process(engine: &mut Engine) {
     engine.reset(); // delegates to the public API
 }
@@ -651,7 +654,7 @@ fn process(engine: &mut Engine) {
 
 ### Maximize Cohesion
 
-All items in a module should contribute to a single, well-defined purpose. If a struct has methods that don't use most of its fields, it has low cohesion — split it.
+All items in a module should contribute to a single, well-defined purpose. If a struct has methods that don't use most of its fields, it has low cohesion - split it.
 
 ### Code Smells That Signal Coupling/Cohesion Problems
 
@@ -659,7 +662,7 @@ All items in a module should contribute to a single, well-defined purpose. If a 
 
 **Feature envy:** A function mostly uses data from another struct. Move it there, or make it a method on that struct.
 
-**Message chains:** `order.customer().address().city().name()` — you know too much about internal structure. Provide `order.shipping_city()` instead.
+**Message chains:** `order.customer().address().city().name()` - you know too much about internal structure. Provide `order.shipping_city()` instead.
 
 **Middle man:** A struct that only delegates to another struct with no added value. Delete it.
 
@@ -723,10 +726,10 @@ pub fn compute(input: &Data) -> Result<Output, Error> { ... }
 
 Every `pub` item gets a `///` doc comment. Enforced by `missing_docs` lint.
 
-1. **Summary line** — imperative mood ("Returns", "Creates", not "This function returns").
-2. **`# Examples`** — working doc-test for every public function.
-3. **`# Errors`** — list error variants and when they occur.
-4. **`# Panics`** — if it can panic, document when (should be extremely rare).
+1. **Summary line** - imperative mood ("Returns", "Creates", not "This function returns").
+2. **`# Examples`** - working doc-test for every public function.
+3. **`# Errors`** - list error variants and when they occur.
+4. **`# Panics`** - if it can panic, document when (should be extremely rare).
 
 ```rust
 /// Parses the input string into a structured document.
@@ -864,8 +867,8 @@ fn validate_rejects_expired_token() { ... }
 - Test **behavior**, not implementation. If you refactor internals, tests should still pass.
 - Use `assert_eq!` / `assert_ne!` over plain `assert!` for better failure messages.
 - Each test tests **one thing**. If it fails, you know exactly what broke.
-- Tests must be **independent** — no shared mutable state between tests.
-- No `#[ignore]` tests in main branch — fix or delete them.
+- Tests must be **independent** - no shared mutable state between tests.
+- No `#[ignore]` tests in main branch - fix or delete them.
 - Arrange-Act-Assert structure:
 
 ```rust
@@ -885,33 +888,33 @@ fn applying_coupon_reduces_total() {
 
 ---
 
-## 16. Code Smells — What to Watch For
+## 16. Code Smells - What to Watch For
 
 These are surface indicators of deeper problems. When you spot them, refactor.
 
 ### Bloaters
 
-- **Long function** (>40 lines) — extract smaller functions.
-- **Long parameter list** (>4 params) — use a struct.
-- **Primitive obsession** — use newtypes instead of bare `String`/`u64` for domain concepts.
-- **Data clumps** — groups of values that always travel together should be a struct.
+- **Long function** (>40 lines) - extract smaller functions.
+- **Long parameter list** (>4 params) - use a struct.
+- **Primitive obsession** - use newtypes instead of bare `String`/`u64` for domain concepts.
+- **Data clumps** - groups of values that always travel together should be a struct.
 
 ### Change Preventers
 
-- **Shotgun surgery** — one change touches many files. Extract the shared concept.
-- **Divergent change** — one module changes for many unrelated reasons. Split it.
+- **Shotgun surgery** - one change touches many files. Extract the shared concept.
+- **Divergent change** - one module changes for many unrelated reasons. Split it.
 
 ### Dispensables
 
-- **Dead code** — delete it. Git remembers.
-- **Speculative generality** — traits/factories for one implementation. Delete the abstraction.
-- **TODO/FIXME graveyard** — fix them or file issues and remove the comments.
+- **Dead code** - delete it. Git remembers.
+- **Speculative generality** - traits/factories for one implementation. Delete the abstraction.
+- **TODO/FIXME graveyard** - fix them or file issues and remove the comments.
 
 ### Couplers
 
-- **Feature envy** — a function mostly uses another struct's data. Move it.
-- **Message chains** — `a.b().c().d()`. Provide a direct method instead.
-- **Inappropriate intimacy** — reaching into another module's `pub(crate)` internals. Use the public API.
+- **Feature envy** - a function mostly uses another struct's data. Move it.
+- **Message chains** - `a.b().c().d()`. Provide a direct method instead.
+- **Inappropriate intimacy** - reaching into another module's `pub(crate)` internals. Use the public API.
 
 ---
 
@@ -1001,11 +1004,11 @@ The `VERSION` file at the repository root is the single source of truth. `Cargo.
 
 Every PR must pass:
 
-1. `cargo fmt --check` — formatting
-2. `cargo clippy --all-features --all-targets -- -D warnings` — lints
-3. `cargo test --all-features` — tests
-4. `cargo test --no-default-features` — minimal feature tests
-5. `cargo doc --no-deps --all-features` with `-D warnings` — docs build
-6. MSRV check — builds on minimum supported Rust version
-7. VERSION sync — VERSION file matches Cargo.toml
-8. Changelog check — warning if CHANGELOG.md not updated
+1. `cargo fmt --check` - formatting
+2. `cargo clippy --all-features --all-targets -- -D warnings` - lints
+3. `cargo test --all-features` - tests
+4. `cargo test --no-default-features` - minimal feature tests
+5. `cargo doc --no-deps --all-features` with `-D warnings` - docs build
+6. MSRV check - builds on minimum supported Rust version
+7. VERSION sync - VERSION file matches Cargo.toml
+8. Changelog check - warning if CHANGELOG.md not updated
