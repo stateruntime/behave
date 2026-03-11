@@ -1,6 +1,6 @@
 [package]
 name = "behave"
-version = "0.4.1"
+version = "0.4.3"
 authors = ["Jan Piotrzkowski <https://github.com/babilonczyk>", "State Runtime <https://github.com/stateruntime>"]
 edition = "2021"
 rust-version = "1.75"
@@ -38,7 +38,7 @@ regex = ["dep:regex"]
 tokio = ["dep:tokio"]
 
 [dependencies]
-behave-macros = { path = "macros", version = "0.4.1" }
+behave-macros = { path = "macros", version = "0.4.3" }
 clap = { version = "4", features = ["derive"], optional = true }
 crossterm = { version = "0.28", optional = true }
 regex = { version = "1", optional = true, default-features = false, features = ["std", "unicode-perl"] }

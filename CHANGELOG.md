@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-03-11
+
 ### Changed
 
 - Enable `behave-macros` publishing to crates.io (previously had `publish = false`)
