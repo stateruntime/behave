@@ -315,6 +315,39 @@ behave! {
         }
     }
 
+    "parameterized" {
+        "addition" {
+            each [
+                (2, 2, 4),
+                (0, 0, 0),
+                (-1, 1, 0),
+            ] |a, b, expected| {
+                expect!(a + b).to_equal(expected)?;
+            }
+        }
+
+        "single param" {
+            each [1, 2, 3, 5, 8] |n| {
+                expect!(n).to_be_greater_than(0)?;
+            }
+        }
+    }
+
+    "parameterized with setup" {
+        setup {
+            let base = 10;
+        }
+
+        "offset" {
+            each [
+                (1, 11),
+                (5, 15),
+            ] |n, expected| {
+                expect!(base + n).to_equal(expected)?;
+            }
+        }
+    }
+
     pending "todo test" {}
 
     "focus marker" {

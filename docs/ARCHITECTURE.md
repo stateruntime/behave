@@ -64,11 +64,12 @@ User writes:           behave! { "suite" { "test" { expect!(x).to_equal(1)?; } }
                                     |
                         behave-macros parses DSL
                                     |
-                        BehaveInput (AST)
+                        BehaveInput (AST: Group, Test, Pending, Each nodes)
                                     |
                         codegen generates:
                                     |
                         mod suite { #[test] fn test() -> Result<...> { ... } }
+                        (each blocks become mod label { fn case_0, fn case_1, ... })
                                     |
                         cargo test runs standard #[test] functions
 ```
@@ -119,8 +120,7 @@ Ideas that may be revisited in the future:
 
 1. Suite-level shared setup (expensive one-time resources)
 2. Context-returning hooks (setup returns values to tests)
-3. Parameterized tests (data-driven test generation)
-4. Snapshot testing (integrate with `insta` rather than reinvent)
+3. Snapshot testing (integrate with `insta` rather than reinvent)
 
 ## Dependencies
 

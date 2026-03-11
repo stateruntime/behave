@@ -140,6 +140,9 @@ The reason this works is that `behave!` pastes parent setup code before child
 setup code inside the generated test function, so later `let` bindings shadow
 earlier ones using normal Rust rules.
 
+See [`examples/setup_inheritance.rs`](../examples/setup_inheritance.rs) for a
+three-level nested setup example with a realistic pricing domain.
+
 ### Expectations and matchers
 
 `expect!(value)` returns an `Expectation<T>`. Matchers accept expected values
@@ -208,6 +211,107 @@ behave! {
     }
 }
 ```
+
+### Teardown
+
+`teardown` blocks run after every test in the group, even when a test panics
+(in sync mode). Use them for cleanup that must not be skipped:
+
+```rust
+use behave::prelude::*;
+
+behave! {
+    "resource lifecycle" {
+        setup {
+            let resource = vec![1, 2, 3];
+        }
+
+        teardown {
+            drop(resource);
+        }
+
+        "resource is available" {
+            expect!(resource).to_have_length(3)?;
+        }
+    }
+}
+```
+
+Nested groups can each have their own `teardown`. Inner teardowns run before
+outer teardowns (like Rust destructors).
+
+See [`examples/teardown.rs`](../examples/teardown.rs) for nested teardown
+patterns and resource management examples.
+
+### Parameterized Tests
+
+Use `each` inside a labeled block to generate one test per case.
+
+**Multi-parameter (tuple) cases:**
+
+```rust
+use behave::prelude::*;
+
+behave! {
+    "addition" {
+        each [
+            (2, 2, 4),
+            (0, 0, 0),
+            (-1, 1, 0),
+        ] |a, b, expected| {
+            expect!(a + b).to_equal(expected)?;
+        }
+    }
+}
+```
+
+Each tuple generates a separate `case_0`, `case_1`, etc. test function inside a
+module named after the label. Failures are isolated and identifiable in
+`cargo test` output.
+
+**Single-parameter cases:**
+
+```rust
+use behave::prelude::*;
+
+behave! {
+    "positive numbers" {
+        each [1, 2, 3, 5, 8] |n| {
+            expect!(n).to_be_greater_than(0)?;
+        }
+    }
+}
+```
+
+**With inherited setup:**
+
+`each` blocks inherit `setup`, `teardown`, `tokio;`, and `focus` from
+their parent group, just like regular tests.
+
+```rust
+use behave::prelude::*;
+
+behave! {
+    "offsets" {
+        setup {
+            let base = 10;
+        }
+
+        "addition" {
+            each [
+                (1, 11),
+                (5, 15),
+            ] |n, expected| {
+                expect!(base + n).to_equal(expected)?;
+            }
+        }
+    }
+}
+```
+
+See [`examples/parameterized.rs`](../examples/parameterized.rs) for a
+complete working example with HTTP status codes, tax calculations, and
+Fibonacci numbers.
 
 ## Custom Matchers
 
@@ -306,6 +410,7 @@ warning and updates the history file.
 Supported today:
 
 - nested groups and nested `setup` inheritance
+- `each` blocks for parameterized/table-driven test generation
 - `teardown` blocks with panic-safe cleanup (sync) or error-safe cleanup (async)
 - `tokio;` group declaration for `#[tokio::test]` generation (behind `tokio` feature)
 - `expect_panic!` and `expect_no_panic!` macros for panic assertions (behind `std` feature)
@@ -332,6 +437,10 @@ Current limitations:
 ## Which File Should I Read Next?
 
 - [`examples/quickstart.rs`](../examples/quickstart.rs) for the fastest working example
+- [`examples/parameterized.rs`](../examples/parameterized.rs) for `each` blocks with real scenarios
+- [`examples/setup_inheritance.rs`](../examples/setup_inheritance.rs) for deeply nested setup
+- [`examples/teardown.rs`](../examples/teardown.rs) for panic-safe cleanup patterns
+- [`examples/custom_matcher.rs`](../examples/custom_matcher.rs) for reusable matchers
 - [`MATCHERS.md`](MATCHERS.md) for every matcher and its intended use
 - [`RELIABILITY.md`](RELIABILITY.md) for trust, support, and limitation signals
 - [`tests/smoke.rs`](../tests/smoke.rs) for broad matcher and DSL coverage

@@ -1,6 +1,6 @@
 [package]
 name = "behave"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.75"
 license = "Apache-2.0"
@@ -19,7 +19,7 @@ cli = ["dep:clap", "dep:crossterm", "dep:serde", "dep:serde_json", "dep:toml"]
 tokio = ["dep:tokio"]
 
 [dependencies]
-behave-macros = { path = "macros", version = "0.1.0" }
+behave-macros = { path = "macros", version = "0.2.0" }
 clap = { version = "4", features = ["derive"], optional = true }
 crossterm = { version = "0.28", optional = true }
 serde = { version = "1", features = ["derive"], optional = true }

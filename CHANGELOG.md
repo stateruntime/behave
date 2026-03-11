@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0]
+
+### Added
+
+- `each` blocks for parameterized/table-driven test generation
+  - Multi-param tuple syntax: `each [(a, b, c), ...] |x, y, z| { ... }`
+  - Single-param syntax: `each [1, 2, 3] |n| { ... }`
+  - Each case generates a separate `case_N` test function in a module
+  - Inherits `setup`, `teardown`, `tokio;`, and `focus` from parent context
+
+## [0.1.0]
+
 ### Added
 
 - `behave!` proc macro for writing BDD-style test suites with zero-keyword DSL

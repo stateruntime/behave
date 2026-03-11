@@ -17,6 +17,7 @@ list of unrelated unit tests:
 
 - nested groups instead of large test modules
 - `setup` blocks that flow into child scenarios
+- `each` blocks for parameterized/table-driven tests
 - built-in matchers for equality, strings, collections, options, results, and floats
 - `pending` and `focus` markers for test workflow
 - optional `cargo-behave` CLI for tree, JSON, and JUnit output plus flaky-test detection
@@ -69,6 +70,145 @@ cargo test
 
 That is the whole onboarding path. The generated tests are normal `#[test]`
 items, so you can keep using the usual Rust tooling around them.
+
+## Parameterized Tests
+
+Use `each` to generate one test per case. Each case becomes its own `#[test]`
+function, so failures tell you exactly which input broke:
+
+```rust
+use behave::prelude::*;
+
+behave! {
+    "addition" {
+        each [
+            (2, 2, 4),
+            (0, 0, 0),
+            (-1, 1, 0),
+        ] |a, b, expected| {
+            expect!(a + b).to_equal(expected)?;
+        }
+    }
+}
+```
+
+This generates `addition::case_0`, `addition::case_1`, and `addition::case_2`.
+
+Single-parameter cases work too:
+
+```rust
+use behave::prelude::*;
+
+behave! {
+    "Fibonacci numbers are positive" {
+        each [1, 1, 2, 3, 5, 8, 13] |n| {
+            expect!(n).to_be_greater_than(0)?;
+        }
+    }
+}
+```
+
+`each` inherits `setup`, `teardown`, and `tokio;` from the parent group:
+
+```rust
+use behave::prelude::*;
+
+behave! {
+    "tax calculation" {
+        setup {
+            let tax_rate = 0.08_f64;
+        }
+
+        "computes total with tax" {
+            each [
+                (100.0_f64, 108.0_f64),
+                (50.0_f64, 54.0_f64),
+                (0.0_f64, 0.0_f64),
+            ] |price, expected| {
+                let total = price.mul_add(tax_rate, price);
+                expect!(total).to_approximately_equal(expected)?;
+            }
+        }
+    }
+}
+```
+
+See [`examples/parameterized.rs`](examples/parameterized.rs) for the full
+working example.
+
+## Setup Inheritance
+
+`setup` bindings flow from parent groups into child scenarios and child
+`setup` blocks. This avoids duplicating shared state:
+
+```rust
+use behave::prelude::*;
+
+behave! {
+    "order pricing" {
+        setup {
+            let items = vec![1200, 800, 350];
+            let total: i64 = items.iter().sum();
+        }
+
+        "subtotal sums line items" {
+            expect!(total).to_equal(2350)?;
+        }
+
+        "with 10% discount" {
+            setup {
+                let discounted = total - (total * 10 / 100);
+            }
+
+            "applies percentage" {
+                expect!(discounted).to_equal(2115)?;
+            }
+
+            "with shipping" {
+                setup {
+                    let final_total = discounted + 500;
+                }
+
+                "adds flat fee" {
+                    expect!(final_total).to_equal(2615)?;
+                }
+            }
+        }
+    }
+}
+```
+
+See [`examples/setup_inheritance.rs`](examples/setup_inheritance.rs) for
+a fuller version with helper functions and shadowing.
+
+## Teardown
+
+`teardown` blocks run after every test in the group, even if the test panics.
+Use them for cleanup that must not be skipped:
+
+```rust
+use behave::prelude::*;
+
+behave! {
+    "database tests" {
+        setup {
+            let pool = vec!["conn_1"];
+        }
+
+        teardown {
+            // Runs even if the test panics.
+            drop(pool);
+        }
+
+        "connection is available" {
+            expect!(pool).to_have_length(1)?;
+        }
+    }
+}
+```
+
+Inner teardowns run before outer teardowns (like destructors). See
+[`examples/teardown.rs`](examples/teardown.rs) for nested teardown patterns.
 
 ## Copy-Paste Commands
 
@@ -135,10 +275,14 @@ choose it, and a working example for each method, is in
 
 ## Real Examples
 
-- [`examples/quickstart.rs`](examples/quickstart.rs) shows the recommended first suite.
-- [`examples/custom_matcher.rs`](examples/custom_matcher.rs) shows a reusable matcher type.
-- [`examples/cli-workspace/README.md`](examples/cli-workspace/README.md) shows the workspace fixture used to verify CLI JSON and JUnit output in CI.
-- [`tests/smoke.rs`](tests/smoke.rs) exercises the full DSL and matcher surface.
+| Example | What it shows |
+|---------|---------------|
+| [`examples/quickstart.rs`](examples/quickstart.rs) | Recommended first suite with `setup`, matchers, and `pending` |
+| [`examples/parameterized.rs`](examples/parameterized.rs) | `each` blocks with multi-param tuples, single params, and inherited setup |
+| [`examples/setup_inheritance.rs`](examples/setup_inheritance.rs) | Three levels of nested `setup` with a realistic pricing domain |
+| [`examples/teardown.rs`](examples/teardown.rs) | Panic-safe cleanup, nested teardowns, and resource management |
+| [`examples/custom_matcher.rs`](examples/custom_matcher.rs) | Reusable `BehaveMatch<T>` matcher type with negation |
+| [`tests/smoke.rs`](tests/smoke.rs) | Full DSL and matcher surface coverage |
 
 ## What You Can And Cannot Do
 
@@ -147,6 +291,7 @@ You can:
 - nest groups freely
 - share bindings from a parent `setup` into child scenarios
 - shadow a setup binding with a later `let` in a child `setup` or scenario body
+- use `each` blocks for parameterized/table-driven test generation
 - use `teardown` blocks for panic-safe cleanup that runs even when tests fail
 - declare `tokio;` in a group to generate `#[tokio::test]` async tests (requires `tokio` feature)
 - use `cargo test` normally because generated tests are ordinary `#[test]` functions

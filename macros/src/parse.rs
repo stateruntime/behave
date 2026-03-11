@@ -4,7 +4,7 @@
 //! groups (describe blocks) and tests (leaf blocks).
 
 use syn::parse::{Parse, ParseStream};
-use syn::{braced, token, LitStr, Result};
+use syn::{braced, bracketed, token, Expr, Ident, LitStr, Result, Token};
 
 /// Root AST node containing all top-level groups.
 #[derive(Debug)]
@@ -21,6 +21,8 @@ pub enum BehaveNode {
     Test(TestNode),
     /// A pending test that should be ignored.
     Pending(PendingNode),
+    /// A parameterized test block generating one test per case.
+    Each(EachNode),
 }
 
 /// A group node that contains child nodes.
@@ -46,6 +48,21 @@ pub struct TestNode {
 #[derive(Debug)]
 pub struct PendingNode {
     pub label: String,
+}
+
+/// A parameterized test node that generates one test per case.
+#[derive(Debug)]
+pub struct EachNode {
+    /// Human-readable label for the generated module.
+    pub label: String,
+    /// The list of case expressions (one per generated test).
+    pub cases: Vec<Expr>,
+    /// Parameter names bound from each case expression.
+    pub params: Vec<Ident>,
+    /// The test body executed for each case.
+    pub body: proc_macro2::TokenStream,
+    /// Whether this block was marked with `focus`.
+    pub focused: bool,
 }
 
 impl Parse for BehaveInput {
@@ -99,11 +116,61 @@ fn classify_block(
         return Err(syn::Error::new(span, "empty blocks are not allowed"));
     }
 
+    if looks_like_each(content) {
+        return parse_each_body(content, label, focused);
+    }
+
     if looks_like_group(content) {
         parse_group_body(content, label, span, focused)
     } else {
         parse_test_body(content, label, focused)
     }
+}
+
+/// Peeks ahead to determine if this block starts with `each [`.
+fn looks_like_each(input: ParseStream<'_>) -> bool {
+    let fork = input.fork();
+    let Ok(id) = fork.parse::<Ident>() else {
+        return false;
+    };
+    id == "each" && fork.peek(token::Bracket)
+}
+
+/// Parses `each [cases] |params| { body }` into an [`EachNode`].
+fn parse_each_body(input: ParseStream<'_>, label: String, focused: bool) -> Result<BehaveNode> {
+    // Consume `each`
+    let _each: Ident = input.parse()?;
+
+    // Parse `[case1, case2, ...]`
+    let cases_content;
+    bracketed!(cases_content in input);
+    let punctuated =
+        syn::punctuated::Punctuated::<Expr, Token![,]>::parse_terminated(&cases_content)?;
+    let cases: Vec<Expr> = punctuated.into_iter().collect();
+
+    if cases.is_empty() {
+        return Err(input.error("each block must contain at least one case"));
+    }
+
+    // Parse `|param1, param2, ...|`
+    let _pipe1: Token![|] = input.parse()?;
+    let params_punctuated =
+        syn::punctuated::Punctuated::<Ident, Token![,]>::parse_separated_nonempty(input)?;
+    let params: Vec<Ident> = params_punctuated.into_iter().collect();
+    let _pipe2: Token![|] = input.parse()?;
+
+    // Parse `{ body }`
+    let body_content;
+    braced!(body_content in input);
+    let body: proc_macro2::TokenStream = body_content.parse()?;
+
+    Ok(BehaveNode::Each(EachNode {
+        label,
+        cases,
+        params,
+        body,
+        focused,
+    }))
 }
 
 /// Peeks ahead to determine if this block contains child groups
@@ -651,5 +718,118 @@ mod tests {
         } else {
             panic!("expected inner Group node");
         }
+    }
+
+    /// Unwrap a successful parse and return the first node as an Each.
+    fn first_each(input: Result<BehaveInput>) -> EachNode {
+        let parsed = input.expect("parse should succeed");
+        match parsed.nodes.into_iter().next() {
+            Some(BehaveNode::Each(e)) => e,
+            other => panic!("expected Each node, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_each_basic() {
+        let input = quote::quote! {
+            "addition" {
+                each [
+                    (2, 2, 4),
+                    (0, 0, 0),
+                    (-1, 1, 0),
+                ] |a, b, expected| {
+                    let _ = a + b == expected;
+                }
+            }
+        };
+        let parsed = parse_input(input);
+        assert!(parsed.is_ok());
+        let group = first_group(parsed);
+        match &group.children[0] {
+            BehaveNode::Each(each) => {
+                assert_eq!(each.label, "addition");
+                assert_eq!(each.cases.len(), 3);
+                assert_eq!(each.params.len(), 3);
+                assert_eq!(each.params[0], "a");
+                assert_eq!(each.params[1], "b");
+                assert_eq!(each.params[2], "expected");
+                assert!(!each.focused);
+            }
+            other => panic!("expected Each node, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_each_single_param() {
+        let input = quote::quote! {
+            "positives" {
+                each [1, 2, 3, 5, 8] |n| {
+                    let _ = n;
+                }
+            }
+        };
+        let parsed = parse_input(input);
+        assert!(parsed.is_ok());
+        let group = first_group(parsed);
+        match &group.children[0] {
+            BehaveNode::Each(each) => {
+                assert_eq!(each.cases.len(), 5);
+                assert_eq!(each.params.len(), 1);
+                assert_eq!(each.params[0], "n");
+            }
+            other => panic!("expected Each node, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_each_empty_cases_errors() {
+        let input = quote::quote! {
+            "empty" {
+                each [] |n| {
+                    let _ = n;
+                }
+            }
+        };
+        let parsed = parse_input(input);
+        assert!(parsed.is_err());
+        let msg = parsed.unwrap_err().to_string();
+        assert!(
+            msg.contains("at least one case"),
+            "expected 'at least one case' error, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn parse_each_focused() {
+        let input = quote::quote! {
+            focus "cases" {
+                each [1, 2] |n| {
+                    let _ = n;
+                }
+            }
+        };
+        let parsed = parse_input(input);
+        assert!(parsed.is_ok());
+        let group = first_group(parsed);
+        assert!(group.focused);
+        match &group.children[0] {
+            BehaveNode::Each(each) => {
+                assert_eq!(each.cases.len(), 2);
+            }
+            other => panic!("expected Each node, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_each_top_level() {
+        let input = quote::quote! {
+            "values" {
+                each [10, 20] |v| {
+                    let _ = v;
+                }
+            }
+        };
+        let parsed = parse_input(input);
+        assert!(parsed.is_ok());
     }
 }

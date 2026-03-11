@@ -6,7 +6,7 @@
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::{format_ident, quote};
 
-use crate::parse::{BehaveInput, BehaveNode, GroupNode, PendingNode, TestNode};
+use crate::parse::{BehaveInput, BehaveNode, EachNode, GroupNode, PendingNode, TestNode};
 use crate::slug::{is_rust_keyword, slugify};
 
 /// Creates an identifier, using a raw identifier for Rust keywords.
@@ -48,6 +48,7 @@ fn generate_node(node: &BehaveNode, ctx: &GenContext<'_>) -> syn::Result<TokenSt
         BehaveNode::Group(group) => generate_group(group, ctx),
         BehaveNode::Test(test) => Ok(generate_test(test, ctx)),
         BehaveNode::Pending(pending) => Ok(generate_pending(pending)),
+        BehaveNode::Each(each) => Ok(generate_each(each, ctx)),
     }
 }
 
@@ -91,8 +92,21 @@ fn generate_test(test: &TestNode, ctx: &GenContext<'_>) -> TokenStream {
         make_ident(&slugify(&test.label))
     };
 
+    let empty = TokenStream::new();
+    generate_test_fn(fn_name, &empty, &test.body, ctx)
+}
+
+/// Shared helper that emits a single `#[test]` (or `#[tokio::test]`) function.
+///
+/// `extra_setup` is prepended after inherited setups — used by `each` to bind
+/// case parameters. Regular tests pass an empty stream.
+fn generate_test_fn(
+    fn_name: Ident,
+    extra_setup: &TokenStream,
+    body: &TokenStream,
+    ctx: &GenContext<'_>,
+) -> TokenStream {
     let setup_tokens: TokenStream = ctx.setups.iter().map(|s| quote! { #s }).collect();
-    let body = &test.body;
     let has_teardown = !ctx.teardowns.is_empty();
 
     // Teardowns run in reverse order (innermost first, like destructors)
@@ -103,6 +117,7 @@ fn generate_test(test: &TestNode, ctx: &GenContext<'_>) -> TokenStream {
             #[test]
             fn #fn_name() -> Result<(), Box<dyn std::error::Error>> {
                 #setup_tokens
+                #extra_setup
                 #body
                 Ok(())
             }
@@ -111,6 +126,7 @@ fn generate_test(test: &TestNode, ctx: &GenContext<'_>) -> TokenStream {
             #[test]
             fn #fn_name() -> Result<(), Box<dyn std::error::Error>> {
                 #setup_tokens
+                #extra_setup
                 let __behave_test_result = std::panic::catch_unwind(
                     std::panic::AssertUnwindSafe(|| -> Result<(), Box<dyn std::error::Error>> {
                         #body
@@ -128,6 +144,7 @@ fn generate_test(test: &TestNode, ctx: &GenContext<'_>) -> TokenStream {
             #[tokio::test]
             async fn #fn_name() -> Result<(), Box<dyn std::error::Error>> {
                 #setup_tokens
+                #extra_setup
                 #body
                 Ok(())
             }
@@ -136,6 +153,7 @@ fn generate_test(test: &TestNode, ctx: &GenContext<'_>) -> TokenStream {
             #[tokio::test]
             async fn #fn_name() -> Result<(), Box<dyn std::error::Error>> {
                 #setup_tokens
+                #extra_setup
                 let __behave_test_result: Result<(), Box<dyn std::error::Error>> = async {
                     #body
                     Ok(())
@@ -144,6 +162,42 @@ fn generate_test(test: &TestNode, ctx: &GenContext<'_>) -> TokenStream {
                 __behave_test_result
             }
         },
+    }
+}
+
+fn generate_each(each: &EachNode, ctx: &GenContext<'_>) -> TokenStream {
+    let slug = slugify(&each.label);
+    let mod_name = if each.focused {
+        format_ident!("__FOCUS__{slug}")
+    } else {
+        make_ident(&slug)
+    };
+
+    let case_fns: TokenStream = each
+        .cases
+        .iter()
+        .enumerate()
+        .map(|(i, case_expr)| {
+            let fn_name = format_ident!("case_{i}");
+            let params = &each.params;
+
+            // Single param: `let p = expr;`  Multi param: `let (p1, p2) = expr;`
+            let binding = if params.len() == 1 {
+                let p = &params[0];
+                quote! { let #p = #case_expr; }
+            } else {
+                quote! { let (#(#params),*) = #case_expr; }
+            };
+
+            generate_test_fn(fn_name, &binding, &each.body, ctx)
+        })
+        .collect();
+
+    quote! {
+        mod #mod_name {
+            use super::*;
+            #case_fns
+        }
     }
 }
 
@@ -360,5 +414,90 @@ mod tests {
         let code = result.map(|t| t.to_string()).unwrap_or_default();
         assert!(code.contains("mod a"));
         assert!(code.contains("mod b"));
+    }
+
+    #[test]
+    fn generates_each_tests() {
+        let input = quote::quote! {
+            "math" {
+                "addition" {
+                    each [
+                        (2, 2, 4),
+                        (0, 0, 0),
+                    ] |a, b, expected| {
+                        let _ = a + b == expected;
+                    }
+                }
+            }
+        };
+        let result = parse_and_generate(input);
+        assert!(result.is_ok());
+        let code = result.map(|t| t.to_string()).unwrap_or_default();
+        assert!(
+            code.contains("mod addition"),
+            "expected mod addition in: {code}"
+        );
+        assert!(code.contains("fn case_0"), "expected fn case_0 in: {code}");
+        assert!(code.contains("fn case_1"), "expected fn case_1 in: {code}");
+    }
+
+    #[test]
+    fn generates_each_single_param() {
+        let input = quote::quote! {
+            "values" {
+                each [1, 2, 3] |n| {
+                    let _ = n;
+                }
+            }
+        };
+        let result = parse_and_generate(input);
+        assert!(result.is_ok());
+        let code = result.map(|t| t.to_string()).unwrap_or_default();
+        assert!(code.contains("fn case_0"), "expected fn case_0 in: {code}");
+        assert!(code.contains("fn case_1"), "expected fn case_1 in: {code}");
+        assert!(code.contains("fn case_2"), "expected fn case_2 in: {code}");
+    }
+
+    #[test]
+    fn generates_each_with_focus() {
+        let input = quote::quote! {
+            focus "cases" {
+                each [1, 2] |n| {
+                    let _ = n;
+                }
+            }
+        };
+        let result = parse_and_generate(input);
+        assert!(result.is_ok());
+        let code = result.map(|t| t.to_string()).unwrap_or_default();
+        assert!(
+            code.contains("__FOCUS__"),
+            "expected __FOCUS__ prefix in: {code}"
+        );
+    }
+
+    #[test]
+    fn generates_each_with_inherited_setup() {
+        let input = quote::quote! {
+            "suite" {
+                setup {
+                    let base = 10;
+                }
+
+                "offset" {
+                    each [
+                        (1, 11),
+                        (5, 15),
+                    ] |n, expected| {
+                        let _ = base + n == expected;
+                    }
+                }
+            }
+        };
+        let result = parse_and_generate(input);
+        assert!(result.is_ok());
+        let code = result.map(|t| t.to_string()).unwrap_or_default();
+        assert!(code.contains("base"), "expected setup binding in: {code}");
+        assert!(code.contains("fn case_0"), "expected fn case_0 in: {code}");
     }
 }
