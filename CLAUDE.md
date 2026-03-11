@@ -48,9 +48,11 @@ src/
   lib.rs                         # Public API surface, re-exports, macros
   error.rs                       # MatchError type
   expectation.rs                 # Expectation<T> wrapper
+  combinators.rs                 # all_of, any_of, not_matching combinators
   custom.rs                      # BehaveMatch<T> trait
   matchers/
     mod.rs                       # Matcher module index
+    hashmap.rs                   # [feature = "std"] HashMap/BTreeMap matchers
     equality.rs                  # to_equal, to_not_equal
     boolean.rs                   # to_be_true, to_be_false
     ordering.rs                  # to_be_greater_than, to_be_less_than, etc.

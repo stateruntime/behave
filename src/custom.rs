@@ -41,6 +41,16 @@ pub trait BehaveMatch<T> {
     fn description(&self) -> &str;
 }
 
+impl<T> BehaveMatch<T> for Box<dyn BehaveMatch<T>> {
+    fn matches(&self, actual: &T) -> bool {
+        (**self).matches(actual)
+    }
+
+    fn description(&self) -> &str {
+        (**self).description()
+    }
+}
+
 impl<T: core::fmt::Debug> Expectation<T> {
     /// Asserts the value satisfies a custom [`BehaveMatch`] matcher.
     ///

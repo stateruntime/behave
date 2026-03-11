@@ -76,7 +76,7 @@ items, so you can keep using the usual Rust tooling around them.
 Use `each` to generate one test per case. Each case becomes its own `#[test]`
 function, so failures tell you exactly which input broke:
 
-```rust
+```rust,ignore
 use behave::prelude::*;
 
 behave! {
@@ -96,7 +96,7 @@ This generates `addition::case_0`, `addition::case_1`, and `addition::case_2`.
 
 Single-parameter cases work too:
 
-```rust
+```rust,ignore
 use behave::prelude::*;
 
 behave! {
@@ -110,7 +110,7 @@ behave! {
 
 `each` inherits `setup`, `teardown`, and `tokio;` from the parent group:
 
-```rust
+```rust,ignore
 use behave::prelude::*;
 
 behave! {
@@ -183,10 +183,9 @@ a fuller version with helper functions and shadowing.
 
 ## Teardown
 
-`teardown` blocks run after every test in the group, even if the test panics.
-Use them for cleanup that must not be skipped:
+`teardown` blocks run after every test in the group, even if the test panics (sync tests) or returns an error (async tests). Use them for cleanup:
 
-```rust
+```rust,ignore
 use behave::prelude::*;
 
 behave! {
@@ -196,7 +195,7 @@ behave! {
         }
 
         teardown {
-            // Runs even if the test panics.
+            // Runs after the test body (panic-safe in sync mode).
             drop(pool);
         }
 
@@ -249,6 +248,8 @@ cargo behave --output junit
 |---------|---------|-------------|
 | `std` | Yes | Standard library support |
 | `cli` | No | Enables `cargo-behave` and flaky-test utilities |
+| `color` | No | ANSI-colored diff output for assertion failures |
+| `regex` | No | `to_match_regex` and `to_contain_regex` matchers |
 | `tokio` | No | Enables `tokio;` async test generation |
 
 ## Matchers
@@ -266,6 +267,9 @@ cargo behave --output junit
 | Panic | `expect_panic!`, `expect_no_panic!` |
 | Predicate | `to_satisfy` |
 | Custom | `to_match` with `BehaveMatch` |
+| Regex *(feature)* | `to_match_regex`, `to_contain_regex` |
+| Map (`HashMap`, `BTreeMap`) | `to_contain_key`, `to_contain_value`, `to_contain_entry`, `to_be_empty`, `to_not_be_empty`, `to_have_length` |
+| Composition | `all_of`, `any_of`, `not_matching` |
 
 All matchers respect `.not()`.
 
@@ -292,7 +296,7 @@ You can:
 - share bindings from a parent `setup` into child scenarios
 - shadow a setup binding with a later `let` in a child `setup` or scenario body
 - use `each` blocks for parameterized/table-driven test generation
-- use `teardown` blocks for panic-safe cleanup that runs even when tests fail
+- use `teardown` blocks for cleanup after each test (panic-safe in sync, error-safe in async)
 - declare `tokio;` in a group to generate `#[tokio::test]` async tests (requires `tokio` feature)
 - use `cargo test` normally because generated tests are ordinary `#[test]` functions
 - use `cargo behave` for tree output, filters, and libtest flags

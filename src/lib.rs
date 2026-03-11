@@ -83,6 +83,14 @@
 //! | `.to_match(m)` | Custom [`BehaveMatch`] impl |
 //! | [`expect_panic!`] | Expression panics |
 //! | [`expect_no_panic!`] | Expression does not panic |
+//! | **Composition** ([`combinators`]) | |
+//! | [`all_of`](combinators::all_of) | All matchers must pass |
+//! | [`any_of`](combinators::any_of) | At least one must pass |
+//! | [`not_matching`](combinators::not_matching) | Inverts one matcher |
+//! | **Map** (`HashMap`, `BTreeMap`) | |
+//! | `.to_contain_key(k)` | Map has key |
+//! | `.to_contain_value(v)` | Map has value |
+//! | `.to_contain_entry(k, v)` | Map has key-value pair |
 //!
 //! ## Negation
 //!
@@ -116,7 +124,7 @@
 //! - **`teardown { ... }`** — cleanup code that runs after each test
 //! - **`each [...] |args| { ... }`** — parameterized test generation
 //! - **`pending "name" { ... }`** — mark tests as ignored
-//! - **`focus "name" { ... }`** — mark tests for focused running
+//! - **`focus "name" { ... }`** — mark tests with a __FOCUS__ prefix in generated names
 //! - **`tokio;`** — generate async tests *(requires `tokio` feature)*
 //!
 //! ## Feature Flags
@@ -129,6 +137,7 @@
 //! | `regex` | No      | `to_match_regex` and `to_contain_regex` matchers |
 //! | `tokio` | No      | Re-exports `tokio` for `tokio;` async test generation |
 
+pub mod combinators;
 mod custom;
 mod error;
 mod expectation;
@@ -253,6 +262,7 @@ macro_rules! expect_no_panic {
 /// let _ = expect!(1 + 1);
 /// ```
 pub mod prelude {
+    pub use crate::combinators::{all_of, any_of, not_matching};
     pub use crate::custom::BehaveMatch;
     pub use crate::error::MatchError;
     pub use crate::expectation::Expectation;

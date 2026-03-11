@@ -21,6 +21,7 @@
 //! | `strings` | `to_start_with`, `to_end_with`, `to_contain_substr`, `to_have_str_length` | text shape |
 //! | `float` | `to_approximately_equal`, `to_approximately_equal_within` | float comparison with epsilon tolerance |
 //! | `regex` | `to_match_regex`, `to_contain_regex` | pattern matching *(requires `regex` feature)* |
+//! | `hashmap` | `to_contain_key`, `to_contain_value`, `to_contain_entry`, `to_be_empty`, `to_not_be_empty`, `to_have_length` | `HashMap` and `BTreeMap` assertions *(requires `std` feature)* |
 //!
 //! Additional matchers defined outside this module:
 //!
@@ -32,6 +33,8 @@ mod boolean;
 mod collections;
 mod equality;
 mod float;
+#[cfg(feature = "std")]
+mod hashmap;
 mod option;
 mod ordering;
 #[cfg(feature = "regex")]

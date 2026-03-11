@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0]
+
+### Added
+
+- Matcher combinators for composing multiple matchers
+  - `all_of(matchers)` — passes when all inner matchers pass (empty = vacuous truth)
+  - `any_of(matchers)` — passes when at least one inner matcher passes (empty = fail)
+  - `not_matching(matcher)` — inverts a single matcher inside a composition
+  - Combinators implement `BehaveMatch<T>` and nest recursively
+  - Multi-line failure descriptions with bullet lists and indented sub-matchers
+- `BehaveMatch<T>` impl for `Box<dyn BehaveMatch<T>>` — enables passing boxed matchers to `to_match()`
+- `HashMap` and `BTreeMap` matchers (behind `std` feature)
+  - `to_contain_key(k)` — map has key
+  - `to_contain_value(v)` — map has value
+  - `to_contain_entry(k, v)` — map has key-value pair
+  - `to_be_empty()` — no entries
+  - `to_not_be_empty()` — has entries
+  - `to_have_length(n)` — exact entry count
+
 ## [0.3.0]
 
 ### Added

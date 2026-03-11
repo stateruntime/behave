@@ -497,6 +497,175 @@ mod panic_macros {
     }
 }
 
+#[cfg(feature = "std")]
+mod combinator_tests {
+    use behave::prelude::*;
+
+    struct IsPositive;
+    #[allow(clippy::unnecessary_literal_bound)]
+    impl BehaveMatch<i32> for IsPositive {
+        fn matches(&self, actual: &i32) -> bool {
+            *actual > 0
+        }
+        fn description(&self) -> &str {
+            "to be positive"
+        }
+    }
+
+    struct IsEven;
+    #[allow(clippy::unnecessary_literal_bound)]
+    impl BehaveMatch<i32> for IsEven {
+        fn matches(&self, actual: &i32) -> bool {
+            actual % 2 == 0
+        }
+        fn description(&self) -> &str {
+            "to be even"
+        }
+    }
+
+    struct IsZero;
+    #[allow(clippy::unnecessary_literal_bound)]
+    impl BehaveMatch<i32> for IsZero {
+        fn matches(&self, actual: &i32) -> bool {
+            *actual == 0
+        }
+        fn description(&self) -> &str {
+            "to be zero"
+        }
+    }
+
+    behave! {
+        "combinators" {
+            "all_of passes when all match" {
+                let m = all_of(vec![
+                    Box::new(IsPositive) as Box<dyn BehaveMatch<i32>>,
+                    Box::new(IsEven),
+                ]);
+                expect!(4).to_match(m)?;
+            }
+
+            "all_of fails when one does not match" {
+                let m = all_of(vec![
+                    Box::new(IsPositive) as Box<dyn BehaveMatch<i32>>,
+                    Box::new(IsEven),
+                ]);
+                expect!(3).negate().to_match(m)?;
+            }
+
+            "any_of passes when one matches" {
+                let m = any_of(vec![
+                    Box::new(IsZero) as Box<dyn BehaveMatch<i32>>,
+                    Box::new(IsPositive),
+                ]);
+                expect!(5).to_match(m)?;
+            }
+
+            "any_of fails when none match" {
+                let m = any_of(vec![
+                    Box::new(IsZero) as Box<dyn BehaveMatch<i32>>,
+                    Box::new(IsEven),
+                ]);
+                expect!(3).negate().to_match(m)?;
+            }
+
+            "not_matching inverts" {
+                let m = not_matching(Box::new(IsEven));
+                expect!(7).to_match(m)?;
+            }
+
+            "nested composition" {
+                let inner = all_of(vec![
+                    Box::new(IsPositive) as Box<dyn BehaveMatch<i32>>,
+                    Box::new(IsEven),
+                ]);
+                let m = any_of(vec![
+                    Box::new(IsZero) as Box<dyn BehaveMatch<i32>>,
+                    Box::new(inner),
+                ]);
+                expect!(4).to_match(m)?;
+            }
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+mod hashmap_tests {
+    use behave::prelude::*;
+    use std::collections::{BTreeMap, HashMap};
+
+    behave! {
+        "hashmap matchers" {
+            "contains key" {
+                let mut m = HashMap::new();
+                m.insert("x", 1);
+                expect!(m).to_contain_key(&"x")?;
+            }
+
+            "contains value" {
+                let mut m = HashMap::new();
+                m.insert("x", 42);
+                expect!(m).to_contain_value(&42)?;
+            }
+
+            "contains entry" {
+                let mut m = HashMap::new();
+                m.insert("x", 42);
+                expect!(m).to_contain_entry(&"x", &42)?;
+            }
+
+            "is empty" {
+                let m: HashMap<&str, i32> = HashMap::new();
+                expect!(m).to_be_empty()?;
+            }
+
+            "not empty" {
+                let mut m = HashMap::new();
+                m.insert("a", 1);
+                expect!(m).to_not_be_empty()?;
+            }
+
+            "has length" {
+                let mut m = HashMap::new();
+                m.insert("a", 1);
+                m.insert("b", 2);
+                expect!(m).to_have_length(2)?;
+            }
+        }
+
+        "btreemap matchers" {
+            "contains key" {
+                let mut m = BTreeMap::new();
+                m.insert("x", 1);
+                expect!(m).to_contain_key(&"x")?;
+            }
+
+            "contains value" {
+                let mut m = BTreeMap::new();
+                m.insert("x", 42);
+                expect!(m).to_contain_value(&42)?;
+            }
+
+            "contains entry" {
+                let mut m = BTreeMap::new();
+                m.insert("x", 42);
+                expect!(m).to_contain_entry(&"x", &42)?;
+            }
+
+            "is empty" {
+                let m: BTreeMap<&str, i32> = BTreeMap::new();
+                expect!(m).to_be_empty()?;
+            }
+
+            "has length" {
+                let mut m = BTreeMap::new();
+                m.insert("a", 1);
+                m.insert("b", 2);
+                expect!(m).to_have_length(2)?;
+            }
+        }
+    }
+}
+
 mod common;
 
 /// Demonstrates importing shared helpers from `tests/common/mod.rs`.
@@ -505,8 +674,8 @@ mod common;
 /// Inside the `behave!` block, each group generates `use super::*;` so
 /// the common items propagate through all nesting levels.
 mod shared_imports {
-    use behave::prelude::*;
     use crate::common::{double, IsOrigin, Point};
+    use behave::prelude::*;
 
     behave! {
         "shared imports" {

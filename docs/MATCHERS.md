@@ -189,6 +189,26 @@ fn main() -> Result<(), behave::MatchError> {
 }
 ```
 
+## Regex
+
+Regex matchers check strings against regular expression patterns. Requires the
+`regex` feature flag.
+
+| Matcher | What it checks | Why use it |
+|---------|----------------|------------|
+| `to_match_regex(pattern)` | entire string matches the regex (auto-anchored) | useful for validating structured formats like IDs, dates, or codes |
+| `to_contain_regex(pattern)` | string contains a substring matching the regex | useful for finding patterns inside larger text |
+
+```rust
+use behave::Expectation;
+
+fn main() -> Result<(), behave::MatchError> {
+    Expectation::new("hello123", "s").to_match_regex(r"hello\d+")?;
+    Expectation::new("order #42 confirmed", "s").to_contain_regex(r"#\d+")?;
+    Ok(())
+}
+```
+
 ## Panic Macros
 
 Use the panic macros when the contract is about whether code panics at all.
@@ -259,6 +279,80 @@ impl BehaveMatch<i32> for IsEven {
 
 fn main() -> Result<(), behave::MatchError> {
     expect!(4).to_match(IsEven)?;
+    Ok(())
+}
+```
+
+## Map
+
+Map matchers work on both `HashMap` and `BTreeMap`. They require the `std`
+feature (enabled by default).
+
+| Matcher | What it checks | Why use it |
+|---------|----------------|------------|
+| `to_contain_key(key)` | map contains the key | verifies expected keys without inspecting values |
+| `to_contain_value(value)` | map contains the value | useful when keys are opaque but values matter |
+| `to_contain_entry(key, value)` | map contains the key-value pair | checks both key and value in one assertion |
+| `to_be_empty()` | map has no entries | makes empty-state behavior obvious |
+| `to_not_be_empty()` | map has at least one entry | more direct than negating `to_be_empty()` |
+| `to_have_length(n)` | map has exactly `n` entries | useful when exact size matters |
+
+```rust
+use std::collections::HashMap;
+use behave::Expectation;
+
+fn main() -> Result<(), behave::MatchError> {
+    let mut m = HashMap::new();
+    m.insert("a", 1);
+    m.insert("b", 2);
+
+    Expectation::new(m.clone(), "m").to_contain_key(&"a")?;
+    Expectation::new(m.clone(), "m").to_contain_value(&2)?;
+    Expectation::new(m.clone(), "m").to_contain_entry(&"a", &1)?;
+    Expectation::new(m, "m").to_have_length(2)?;
+    Ok(())
+}
+```
+
+## Composition
+
+Composition combinators build complex assertions from simple matchers. All three
+implement `BehaveMatch<T>`, so they compose recursively.
+
+| Function | Semantics | Why use it |
+|----------|-----------|------------|
+| `all_of(matchers)` | all matchers must pass (empty = pass) | logical AND across multiple custom matchers |
+| `any_of(matchers)` | at least one must pass (empty = fail) | logical OR across multiple custom matchers |
+| `not_matching(matcher)` | inverts a single matcher | negate one matcher inside a combinator without affecting the outer chain |
+
+```rust
+use behave::prelude::*;
+use behave::combinators::{all_of, any_of, not_matching};
+
+struct IsPositive;
+impl BehaveMatch<i32> for IsPositive {
+    fn matches(&self, actual: &i32) -> bool { *actual > 0 }
+    fn description(&self) -> &str { "to be positive" }
+}
+
+struct IsEven;
+impl BehaveMatch<i32> for IsEven {
+    fn matches(&self, actual: &i32) -> bool { actual % 2 == 0 }
+    fn description(&self) -> &str { "to be even" }
+}
+
+fn main() -> Result<(), behave::MatchError> {
+    let matcher = all_of(vec![
+        Box::new(IsPositive) as Box<dyn BehaveMatch<i32>>,
+        Box::new(IsEven),
+    ]);
+    Expectation::new(4, "4").to_match(matcher)?;
+
+    let matcher = any_of(vec![
+        Box::new(IsPositive) as Box<dyn BehaveMatch<i32>>,
+        Box::new(not_matching(Box::new(IsEven))),
+    ]);
+    Expectation::new(-3, "-3").to_match(matcher)?;
     Ok(())
 }
 ```

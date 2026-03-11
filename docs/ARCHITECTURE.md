@@ -37,8 +37,10 @@ src/
   lib.rs              # Public API, re-exports, expect!/expect_panic!/expect_no_panic! macros
   error.rs            # MatchError - structured error from failed assertions
   expectation.rs      # Expectation<T> - wraps values for matcher chains
+  combinators.rs      # all_of, any_of, not_matching — matcher composition
   custom.rs           # BehaveMatch<T> trait for user-defined matchers
   matchers/           # Built-in matcher implementations (one file per category)
+    hashmap.rs        # [feature = "std"] HashMap/BTreeMap matchers
     regex.rs          # [feature = "regex"] to_match_regex, to_contain_regex
   cli/                # [feature = "cli"] cargo-behave binary support
     config.rs         # BehaveConfig - behave.toml parsing
