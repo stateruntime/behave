@@ -23,7 +23,7 @@ pub struct TreeNode {
     /// The display name of this node segment.
     pub name: String,
     /// Child nodes (empty for leaf tests).
-    pub children: Vec<TreeNode>,
+    pub children: Vec<Self>,
     /// The test outcome, if this is a leaf node.
     pub outcome: Option<TestOutcome>,
     /// Whether this test was focused.

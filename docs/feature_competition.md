@@ -112,13 +112,13 @@ But requires learning 3 crates and mixing attribute styles.
 - [x] **#1 Parameterized tests (`each`)** — closes gap against rstest `#[case]` — **DONE v0.2.0**
 - [x] **#2 Colored diff output** — closes gap against pretty_assertions — **DONE v0.3.0**
 - [x] **#3 Regex string matchers** — closes gap against googletest `matches_regex` — **DONE v0.3.0**
-- [ ] **#4 Matcher composition (`all!`, `any!`)** — closes gap against googletest combinators — Medium effort (new macros or methods)
+- [x] **#4 Matcher composition (`all_of`, `any_of`, `not_matching`)** — closes gap against googletest combinators — **DONE v0.4.0**
 - [ ] **#5 Soft assertions mode** — closes gap against googletest `expect_that!` — Large effort (collect errors, report all)
 
 ### P1 — Medium impact, differentiators
 
 - [ ] **#6 Test timeout** — prevents hanging tests — Medium effort (DSL + codegen)
-- [ ] **#7 HashMap/BTreeMap matchers** — common data structures — Small effort (3-4 matchers)
+- [x] **#7 HashMap/BTreeMap matchers** — common data structures — **DONE v0.4.0**
 - [ ] **#8 Snapshot testing** (`to_match_snapshot`) — wrap insta integration — Medium effort
 - [ ] **#9 Matrix `each`** (cross-product) — rstest `#[values]` parity — Medium effort (parser + codegen)
 - [ ] **#10 Type/field matchers** — googletest `field!`, `property!` — Medium effort
