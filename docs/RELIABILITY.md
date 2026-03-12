@@ -19,6 +19,9 @@ reference, CLI guide, examples, integration tests, doctests, and strict linting.
 
 - The `behave!` macro expands to ordinary `#[test]` functions, so the runtime
   model stays close to normal Rust tests.
+- Because tests are ordinary `#[test]`/`#[tokio::test]` functions, behave suites
+  run under standard tooling (IDEs, CI, `cargo test`, and runners like nextest)
+  without a custom harness.
 - Public matchers, macros, and CLI modules have executable examples or doctests.
 - Runnable examples live in `examples/` and are exercised by integration tests.
 - A committed CLI workspace fixture is exercised in CI with real `cargo-behave`
@@ -31,11 +34,23 @@ reference, CLI guide, examples, integration tests, doctests, and strict linting.
 - A security reporting path exists in [SECURITY.md](../SECURITY.md).
 - The crate declares an MSRV of Rust 1.75 in `Cargo.toml`.
 
+## Incremental Adoption Path
+
+Teams rarely switch test tooling in one step. behave is designed to be adopted
+incrementally:
+
+1. **Use `expect!` matchers in existing tests** (no `behave!` required).
+2. **Use `behave!` for scenario-heavy areas** where nesting + shared `setup`
+   improves readability.
+3. **Use `cargo-behave` only if you need it** (tree view, JSON/JUnit reports,
+   flaky history). If you already run tests via nextest, keep that runner and
+   treat `cargo-behave` as an optional reporting/workflow tool.
+
 ## What This Crate Does Not Promise
 
 Trust also comes from stating the boundaries clearly.
 
-- `behave` is currently `0.1.0`, so API evolution is still possible.
+- `behave` is pre-1.0 (`0.x`), so API evolution is still possible.
 - `focus` marks scenarios in generated names and CLI output, but it does not
   force focus-only execution.
 - Only one `setup` block is allowed per group, and it must appear before child
@@ -45,6 +60,17 @@ Trust also comes from stating the boundaries clearly.
   (no `catch_unwind` across `.await` points). Sync teardown is fully panic-safe.
 - Flaky-test detection is heuristic and source-hash based, not a full build
   dependency analysis.
+
+## Competitive Context
+
+behave intentionally sits between two common approaches in the Rust ecosystem:
+
+- **Best-of-breed composition** (fixtures/parameterization + matchers + runner)
+- **Integrated "nested suite" frameworks** that provide DSL + hooks/workflow
+
+For a current competitive snapshot and deep dives, see
+[feature_competition.md](feature_competition.md) and the v1.0 plan in
+[ROADMAP.md](ROADMAP.md).
 
 ## How To Evaluate It In Your Own Codebase
 

@@ -77,7 +77,7 @@ src/
     cargo-behave.rs              # CLI entry point (requires "cli" feature)
 tests/
   smoke.rs                       # Integration tests
-macros/                          # Internal proc-macro subcrate (NOT published)
+macros/                          # Proc-macro crate published as behave-macros (implementation detail)
   Cargo.toml
   src/
     lib.rs                       # #[proc_macro] behave

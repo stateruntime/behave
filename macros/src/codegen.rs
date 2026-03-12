@@ -5,8 +5,11 @@
 
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::{format_ident, quote};
+use syn::Expr;
 
-use crate::parse::{BehaveInput, BehaveNode, EachNode, GroupNode, PendingNode, TestNode};
+use crate::parse::{
+    BehaveInput, BehaveNode, EachCase, EachNode, GroupNode, MatrixNode, PendingNode, TestNode,
+};
 use crate::slug::{is_rust_keyword, slugify};
 
 /// Creates an identifier, using a raw identifier for Rust keywords.
@@ -51,6 +54,7 @@ fn generate_node(node: &BehaveNode, ctx: &GenContext<'_>) -> syn::Result<TokenSt
         BehaveNode::Test(test) => Ok(generate_test(test, ctx)),
         BehaveNode::Pending(pending) => Ok(generate_pending(pending)),
         BehaveNode::Each(each) => Ok(generate_each(each, ctx)),
+        BehaveNode::Matrix(matrix) => Ok(generate_matrix(matrix, ctx)),
     }
 }
 
@@ -96,7 +100,39 @@ fn generate_test(test: &TestNode, ctx: &GenContext<'_>) -> TokenStream {
     };
 
     let empty = TokenStream::new();
-    generate_test_fn(fn_name, &empty, &test.body, ctx)
+    generate_test_fn(&fn_name, &empty, &test.body, ctx, test.xfail)
+}
+
+/// Wraps a test body for `xfail`: catches `Err` → passes, `Ok` → fails.
+fn wrap_xfail_sync(body: &TokenStream) -> TokenStream {
+    quote! {
+        let __behave_xfail: Result<(), Box<dyn std::error::Error>> = (|| {
+            #body
+            Ok(())
+        })();
+        match __behave_xfail {
+            Ok(()) => {
+                return Err("xfail: expected test to fail, but it passed".into());
+            }
+            Err(_) => {}
+        }
+    }
+}
+
+/// Wraps an async test body for `xfail`: catches `Err` → passes, `Ok` → fails.
+fn wrap_xfail_async(body: &TokenStream) -> TokenStream {
+    quote! {
+        let __behave_xfail: Result<(), Box<dyn std::error::Error>> = async {
+            #body
+            Ok(())
+        }.await;
+        match __behave_xfail {
+            Ok(()) => {
+                return Err("xfail: expected test to fail, but it passed".into());
+            }
+            Err(_) => {}
+        }
+    }
 }
 
 /// Shared helper that emits a single `#[test]` (or `#[tokio::test]`) function.
@@ -104,39 +140,64 @@ fn generate_test(test: &TestNode, ctx: &GenContext<'_>) -> TokenStream {
 /// `extra_setup` is prepended after inherited setups — used by `each` to bind
 /// case parameters. Regular tests pass an empty stream.
 fn generate_test_fn(
-    fn_name: Ident,
+    fn_name: &Ident,
     extra_setup: &TokenStream,
     body: &TokenStream,
     ctx: &GenContext<'_>,
+    xfail: bool,
 ) -> TokenStream {
+    let xfail_body;
+    let effective_body = if xfail {
+        xfail_body = if ctx.is_async {
+            wrap_xfail_async(body)
+        } else {
+            wrap_xfail_sync(body)
+        };
+        &xfail_body
+    } else {
+        body
+    };
+
     let setup_tokens: TokenStream = ctx.setups.iter().map(|s| quote! { #s }).collect();
     let has_teardown = !ctx.teardowns.is_empty();
     let teardown_tokens: TokenStream = ctx.teardowns.iter().rev().map(|t| quote! { #t }).collect();
 
     match (ctx.is_async, has_teardown, ctx.timeout_ms) {
-        (false, false, None) => gen_sync(fn_name, &setup_tokens, extra_setup, body),
-        (false, true, None) => {
-            gen_sync_teardown(fn_name, &setup_tokens, extra_setup, body, &teardown_tokens)
+        (false, false, None) => gen_sync(fn_name, &setup_tokens, extra_setup, effective_body),
+        (false, true, None) => gen_sync_teardown(
+            fn_name,
+            &setup_tokens,
+            extra_setup,
+            effective_body,
+            &teardown_tokens,
+        ),
+        (true, false, None) => gen_async(fn_name, &setup_tokens, extra_setup, effective_body),
+        (true, true, None) => gen_async_teardown(
+            fn_name,
+            &setup_tokens,
+            extra_setup,
+            effective_body,
+            &teardown_tokens,
+        ),
+        (false, false, Some(ms)) => {
+            gen_sync_timeout(fn_name, &setup_tokens, extra_setup, effective_body, ms)
         }
-        (true, false, None) => gen_async(fn_name, &setup_tokens, extra_setup, body),
-        (true, true, None) => {
-            gen_async_teardown(fn_name, &setup_tokens, extra_setup, body, &teardown_tokens)
-        }
-        (false, false, Some(ms)) => gen_sync_timeout(fn_name, &setup_tokens, extra_setup, body, ms),
         (false, true, Some(ms)) => gen_sync_teardown_timeout(
             fn_name,
             &setup_tokens,
             extra_setup,
-            body,
+            effective_body,
             &teardown_tokens,
             ms,
         ),
-        (true, false, Some(ms)) => gen_async_timeout(fn_name, &setup_tokens, extra_setup, body, ms),
+        (true, false, Some(ms)) => {
+            gen_async_timeout(fn_name, &setup_tokens, extra_setup, effective_body, ms)
+        }
         (true, true, Some(ms)) => gen_async_teardown_timeout(
             fn_name,
             &setup_tokens,
             extra_setup,
-            body,
+            effective_body,
             &teardown_tokens,
             ms,
         ),
@@ -145,7 +206,7 @@ fn generate_test_fn(
 
 /// Sync test, no teardown, no timeout.
 fn gen_sync(
-    fn_name: Ident,
+    fn_name: &Ident,
     setup: &TokenStream,
     extra: &TokenStream,
     body: &TokenStream,
@@ -161,9 +222,9 @@ fn gen_sync(
     }
 }
 
-/// Sync test with teardown (catch_unwind to guarantee cleanup), no timeout.
+/// Sync test with teardown (`catch_unwind` to guarantee cleanup), no timeout.
 fn gen_sync_teardown(
-    fn_name: Ident,
+    fn_name: &Ident,
     setup: &TokenStream,
     extra: &TokenStream,
     body: &TokenStream,
@@ -191,7 +252,7 @@ fn gen_sync_teardown(
 
 /// Async test, no teardown, no timeout.
 fn gen_async(
-    fn_name: Ident,
+    fn_name: &Ident,
     setup: &TokenStream,
     extra: &TokenStream,
     body: &TokenStream,
@@ -209,7 +270,7 @@ fn gen_async(
 
 /// Async test with teardown (runs after async body completes), no timeout.
 fn gen_async_teardown(
-    fn_name: Ident,
+    fn_name: &Ident,
     setup: &TokenStream,
     extra: &TokenStream,
     body: &TokenStream,
@@ -232,7 +293,7 @@ fn gen_async_teardown(
 
 /// Sync test with timeout, no teardown. Spawns a thread and waits with `recv_timeout`.
 fn gen_sync_timeout(
-    fn_name: Ident,
+    fn_name: &Ident,
     setup: &TokenStream,
     extra: &TokenStream,
     body: &TokenStream,
@@ -264,7 +325,7 @@ fn gen_sync_timeout(
 /// Sync test with teardown and timeout. Setup + body + teardown all run inside
 /// the spawned thread so teardown can access setup variables.
 fn gen_sync_teardown_timeout(
-    fn_name: Ident,
+    fn_name: &Ident,
     setup: &TokenStream,
     extra: &TokenStream,
     body: &TokenStream,
@@ -303,7 +364,7 @@ fn gen_sync_teardown_timeout(
 
 /// Async test with timeout, no teardown. Wraps body in `tokio::time::timeout`.
 fn gen_async_timeout(
-    fn_name: Ident,
+    fn_name: &Ident,
     setup: &TokenStream,
     extra: &TokenStream,
     body: &TokenStream,
@@ -332,7 +393,7 @@ fn gen_async_timeout(
 /// Async test with teardown and timeout. Teardown runs after the timeout
 /// wrapper so cleanup happens regardless of whether the body timed out.
 fn gen_async_teardown_timeout(
-    fn_name: Ident,
+    fn_name: &Ident,
     setup: &TokenStream,
     extra: &TokenStream,
     body: &TokenStream,
@@ -373,8 +434,9 @@ fn generate_each(each: &EachNode, ctx: &GenContext<'_>) -> TokenStream {
         .cases
         .iter()
         .enumerate()
-        .map(|(i, case_expr)| {
-            let fn_name = format_ident!("case_{i}");
+        .map(|(i, case)| {
+            let fn_name = each_case_fn_name(case, i);
+            let case_expr = &case.expr;
             let params = &each.params;
 
             // Single param: `let p = expr;`  Multi param: `let (p1, p2) = expr;`
@@ -385,7 +447,7 @@ fn generate_each(each: &EachNode, ctx: &GenContext<'_>) -> TokenStream {
                 quote! { let (#(#params),*) = #case_expr; }
             };
 
-            generate_test_fn(fn_name, &binding, &each.body, ctx)
+            generate_test_fn(&fn_name, &binding, &each.body, ctx, each.xfail)
         })
         .collect();
 
@@ -395,6 +457,89 @@ fn generate_each(each: &EachNode, ctx: &GenContext<'_>) -> TokenStream {
             #case_fns
         }
     }
+}
+
+fn generate_matrix(matrix: &MatrixNode, ctx: &GenContext<'_>) -> TokenStream {
+    let slug = slugify(&matrix.label);
+    let mod_name = if matrix.focused {
+        format_ident!("__FOCUS__{slug}")
+    } else {
+        make_ident(&slug)
+    };
+
+    let combos = cartesian_product(&matrix.dimensions);
+    let case_fns: TokenStream = combos
+        .iter()
+        .enumerate()
+        .map(|(i, combo)| {
+            let fn_name = matrix_case_fn_name(&matrix.dimensions, combo, i);
+            let params = &matrix.params;
+            let bindings: TokenStream = params
+                .iter()
+                .zip(combo.iter())
+                .map(|(p, expr)| quote! { let #p = #expr; })
+                .collect();
+            generate_test_fn(&fn_name, &bindings, &matrix.body, ctx, matrix.xfail)
+        })
+        .collect();
+
+    quote! {
+        mod #mod_name {
+            use super::*;
+            #case_fns
+        }
+    }
+}
+
+/// Computes the Cartesian product of all dimensions as index-expression tuples.
+fn cartesian_product(dimensions: &[Vec<Expr>]) -> Vec<Vec<&Expr>> {
+    let mut result: Vec<Vec<&Expr>> = vec![vec![]];
+    for dim in dimensions {
+        let mut next = Vec::new();
+        for combo in &result {
+            for expr in dim {
+                let mut extended = combo.clone();
+                extended.push(expr);
+                next.push(extended);
+            }
+        }
+        result = next;
+    }
+    result
+}
+
+/// Generates `case_I_J` names from dimension indices.
+fn matrix_case_fn_name(dimensions: &[Vec<Expr>], combo: &[&Expr], fallback: usize) -> Ident {
+    let indices: Vec<usize> = combo
+        .iter()
+        .zip(dimensions.iter())
+        .map(|(expr, dim)| {
+            dim.iter()
+                .position(|e| token_eq(e, expr))
+                .unwrap_or(fallback)
+        })
+        .collect();
+    let name = indices
+        .iter()
+        .map(std::string::ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("_");
+    format_ident!("case_{name}")
+}
+
+/// Compares two expressions by their token representation.
+fn token_eq(a: &Expr, b: &Expr) -> bool {
+    quote!(#a).to_string() == quote!(#b).to_string()
+}
+
+/// Determines the function name for an `each` case.
+///
+/// If the case has a string label, slugify it. Otherwise, use `case_N`.
+fn each_case_fn_name(case: &EachCase, index: usize) -> Ident {
+    case.label.as_ref().map_or_else(
+        || format_ident!("case_{index}"),
+        |label| make_ident(&slugify(label)),
+    )
 }
 
 fn generate_pending(pending: &PendingNode) -> TokenStream {
@@ -410,6 +555,7 @@ fn generate_pending(pending: &PendingNode) -> TokenStream {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::parse::BehaveInput;
@@ -764,6 +910,53 @@ mod tests {
     }
 
     #[test]
+    fn generates_each_named_cases() {
+        let input = quote::quote! {
+            "http" {
+                "status" {
+                    each [
+                        ("ok", 200, true),
+                        ("not_found", 404, false),
+                    ] |name, code, success| {
+                        let _ = (code, success);
+                    }
+                }
+            }
+        };
+        let result = parse_and_generate(input);
+        assert!(result.is_ok());
+        let code = result.map(|t| t.to_string()).unwrap_or_default();
+        assert!(code.contains("fn ok"), "expected fn ok in: {code}");
+        assert!(
+            code.contains("fn not_found"),
+            "expected fn not_found in: {code}"
+        );
+        assert!(
+            !code.contains("fn case_0"),
+            "should not have case_0 with named cases: {code}"
+        );
+    }
+
+    #[test]
+    fn generates_each_named_single_value() {
+        let input = quote::quote! {
+            "items" {
+                each [
+                    ("small", 1),
+                    ("large", 100),
+                ] |name, n| {
+                    let _ = n;
+                }
+            }
+        };
+        let result = parse_and_generate(input);
+        assert!(result.is_ok());
+        let code = result.map(|t| t.to_string()).unwrap_or_default();
+        assert!(code.contains("fn small"), "expected fn small in: {code}");
+        assert!(code.contains("fn large"), "expected fn large in: {code}");
+    }
+
+    #[test]
     fn generates_each_with_inherited_setup() {
         let input = quote::quote! {
             "suite" {
@@ -786,5 +979,177 @@ mod tests {
         let code = result.map(|t| t.to_string()).unwrap_or_default();
         assert!(code.contains("base"), "expected setup binding in: {code}");
         assert!(code.contains("fn case_0"), "expected fn case_0 in: {code}");
+    }
+
+    // --- xfail codegen tests ---
+
+    #[test]
+    fn generates_xfail_test() {
+        let input = quote::quote! {
+            xfail "expected failure" {
+                let x = 1;
+            }
+        };
+        let result = parse_and_generate(input);
+        assert!(result.is_ok());
+        let code = result.map(|t| t.to_string()).unwrap_or_default();
+        assert!(
+            code.contains("__behave_xfail"),
+            "expected xfail wrapper in: {code}"
+        );
+        assert!(
+            code.contains("expected test to fail"),
+            "expected xfail error message in: {code}"
+        );
+    }
+
+    #[test]
+    fn generates_xfail_each() {
+        let input = quote::quote! {
+            xfail "broken" {
+                each [1, 2] |n| {
+                    let _ = n;
+                }
+            }
+        };
+        let result = parse_and_generate(input);
+        assert!(result.is_ok());
+        let code = result.map(|t| t.to_string()).unwrap_or_default();
+        assert!(
+            code.contains("__behave_xfail"),
+            "expected xfail wrapper in each: {code}"
+        );
+    }
+
+    #[test]
+    fn generates_xfail_async() {
+        let input = quote::quote! {
+            "suite" {
+                tokio;
+
+                xfail "async expected failure" {
+                    let x = 1;
+                }
+            }
+        };
+        let result = parse_and_generate(input);
+        assert!(result.is_ok());
+        let code = result.map(|t| t.to_string()).unwrap_or_default();
+        assert!(code.contains("async fn"), "expected async fn in: {code}");
+        assert!(
+            code.contains("__behave_xfail"),
+            "expected xfail wrapper in async: {code}"
+        );
+    }
+
+    #[test]
+    fn generates_non_xfail_has_no_wrapper() {
+        let input = quote::quote! {
+            "normal test" {
+                let x = 1;
+            }
+        };
+        let result = parse_and_generate(input);
+        assert!(result.is_ok());
+        let code = result.map(|t| t.to_string()).unwrap_or_default();
+        assert!(
+            !code.contains("__behave_xfail"),
+            "normal test should not have xfail wrapper: {code}"
+        );
+    }
+
+    // --- matrix codegen tests ---
+
+    #[test]
+    fn generates_matrix_tests() {
+        let input = quote::quote! {
+            "combos" {
+                matrix [1, 2] x [10, 20] |a, b| {
+                    let _ = a + b;
+                }
+            }
+        };
+        let result = parse_and_generate(input);
+        assert!(result.is_ok());
+        let code = result.map(|t| t.to_string()).unwrap_or_default();
+        assert!(
+            code.contains("mod combos"),
+            "expected mod combos in: {code}"
+        );
+        assert!(
+            code.contains("fn case_0_0"),
+            "expected fn case_0_0 in: {code}"
+        );
+        assert!(
+            code.contains("fn case_0_1"),
+            "expected fn case_0_1 in: {code}"
+        );
+        assert!(
+            code.contains("fn case_1_0"),
+            "expected fn case_1_0 in: {code}"
+        );
+        assert!(
+            code.contains("fn case_1_1"),
+            "expected fn case_1_1 in: {code}"
+        );
+    }
+
+    #[test]
+    fn generates_matrix_with_focus() {
+        let input = quote::quote! {
+            focus "combos" {
+                matrix [1, 2] x [3, 4] |a, b| {
+                    let _ = a + b;
+                }
+            }
+        };
+        let result = parse_and_generate(input);
+        assert!(result.is_ok());
+        let code = result.map(|t| t.to_string()).unwrap_or_default();
+        assert!(
+            code.contains("__FOCUS__"),
+            "expected __FOCUS__ prefix in: {code}"
+        );
+    }
+
+    #[test]
+    fn generates_matrix_three_dimensions() {
+        let input = quote::quote! {
+            "3d" {
+                matrix [1, 2] x [10, 20] x [true] |a, b, c| {
+                    let _ = (a, b, c);
+                }
+            }
+        };
+        let result = parse_and_generate(input);
+        assert!(result.is_ok());
+        let code = result.map(|t| t.to_string()).unwrap_or_default();
+        // 2 * 2 * 1 = 4 cases
+        assert!(
+            code.contains("fn case_0_0_0"),
+            "expected fn case_0_0_0 in: {code}"
+        );
+        assert!(
+            code.contains("fn case_1_1_0"),
+            "expected fn case_1_1_0 in: {code}"
+        );
+    }
+
+    #[test]
+    fn generates_matrix_xfail() {
+        let input = quote::quote! {
+            xfail "broken combos" {
+                matrix [1, 2] x [10, 20] |a, b| {
+                    let _ = a + b;
+                }
+            }
+        };
+        let result = parse_and_generate(input);
+        assert!(result.is_ok());
+        let code = result.map(|t| t.to_string()).unwrap_or_default();
+        assert!(
+            code.contains("__behave_xfail"),
+            "expected xfail wrapper in matrix: {code}"
+        );
     }
 }

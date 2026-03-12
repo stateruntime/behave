@@ -333,6 +333,47 @@ behave! {
         }
     }
 
+    "named parameterized" {
+        "named tuples" {
+            each [
+                ("two plus two", 2, 2, 4),
+                ("zero plus zero", 0, 0, 0),
+                ("negative plus positive", -1, 1, 0),
+            ] |a, b, expected| {
+                expect!(a + b).to_equal(expected)?;
+            }
+        }
+
+        "named single values" {
+            each [
+                ("the answer", 42),
+                ("lucky number", 7),
+            ] |n| {
+                expect!(n).to_be_greater_than(0)?;
+            }
+        }
+
+        "keyword labels become raw idents" {
+            each [
+                ("type", 1),
+                ("match", 2),
+                ("fn", 3),
+            ] |n| {
+                expect!(n).to_be_greater_than(0)?;
+            }
+        }
+
+        "special character labels are slugified" {
+            each [
+                ("hello world!", 1),
+                ("test-case-123", 2),
+                ("100% coverage", 3),
+            ] |n| {
+                expect!(n).to_be_greater_than(0)?;
+            }
+        }
+    }
+
     "parameterized with setup" {
         setup {
             let base = 10;
@@ -345,6 +386,103 @@ behave! {
             ] |n, expected| {
                 expect!(base + n).to_equal(expected)?;
             }
+        }
+    }
+
+    "xfail tests" {
+        xfail "expected failure passes" {
+            expect!(1).to_equal(2)?;
+        }
+
+        xfail "assertion error caught" {
+            expect!("hello").to_start_with("xyz")?;
+        }
+    }
+
+    "xfail with setup" {
+        setup {
+            let val = 42;
+        }
+
+        xfail "setup variable accessible" {
+            expect!(val).to_equal(999)?;
+        }
+    }
+
+    "matrix tests" {
+        "two dimensions" {
+            matrix [1, 2, 3] x ["a", "b"] |n, s| {
+                let result = format!("{n}{s}");
+                expect!(result.len()).to_be_greater_than(1)?;
+            }
+        }
+
+        "matrix with setup" {
+            setup {
+                let prefix = "item";
+            }
+
+            "formatted" {
+                matrix [1, 2] x [10, 20] |a, b| {
+                    let label = format!("{prefix}_{a}_{b}");
+                    expect!(label).to_start_with("item")?;
+                }
+            }
+        }
+
+        "matrix with teardown" {
+            setup {
+                let tracker = std::cell::Cell::new(0);
+            }
+
+            teardown {
+                let _ = tracker.get();
+            }
+
+            "runs teardown after each combo" {
+                matrix [1, 2] x [10, 20] |a, b| {
+                    tracker.set(a + b);
+                    expect!(tracker.get()).to_be_greater_than(0)?;
+                }
+            }
+        }
+
+        "matrix with timeout" {
+            timeout 5000;
+
+            "completes within deadline" {
+                matrix [1, 2] x [10, 20] |a, b| {
+                    expect!(a + b).to_be_greater_than(0)?;
+                }
+            }
+        }
+    }
+
+    "xfail with teardown" {
+        setup {
+            let resource = 42;
+        }
+
+        teardown {
+            let _ = resource;
+        }
+
+        xfail "teardown runs after xfail catches error" {
+            expect!(resource).to_equal(999)?;
+        }
+    }
+
+    "xfail with timeout" {
+        timeout 5000;
+
+        xfail "fails within timeout" {
+            expect!(1).to_equal(2)?;
+        }
+    }
+
+    xfail "matrix with xfail" {
+        matrix [1, 2] x [10, 20] |a, b| {
+            expect!(a + b).to_equal(0)?;
         }
     }
 
@@ -469,6 +607,18 @@ mod async_tests {
                 "teardown runs after async body" {
                     let result = async { val + 1 }.await;
                     expect!(result).to_equal(100)?;
+                }
+            }
+
+            xfail "async xfail catches error" {
+                let val = async { 1 }.await;
+                expect!(val).to_equal(999)?;
+            }
+
+            "async matrix" {
+                matrix [1, 2] x [10, 20] |a, b| {
+                    let sum = async { a + b }.await;
+                    expect!(sum).to_be_greater_than(0)?;
                 }
             }
         }
