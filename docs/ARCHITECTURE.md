@@ -10,14 +10,15 @@ Test suites compile to standard `#[test]` functions with no custom test runtime.
 
 ## Crate Structure
 
-The project is a single published crate with an internal proc-macro subcrate:
+The project is published as two crates:
 
 - **`behave`** - The user-facing library at the project root. Contains matchers,
   the `Expectation` type, declarative macros (`expect!`, `expect_panic!`,
   `expect_no_panic!`), and the optional CLI module.
-- **`behave-macros`** (`macros/`) - Internal proc-macro subcrate, not published
-  separately. Contains the `behave!` proc macro that parses the DSL and generates
-  `#[test]` functions. Users never depend on this crate directly.
+- **`behave-macros`** (`macros/`) - Proc-macro crate that implements the `behave!`
+  DSL and code generation. It is published because `behave` depends on it, but it
+  is still an implementation detail: users should treat it as internal and depend
+  on `behave` instead.
 
 ## Design Principles
 
@@ -119,11 +120,19 @@ Decisions that were considered and intentionally rejected:
 4. **Custom test runners** — keeps tests compatible with `cargo test`, IDEs,
    and CI without additional configuration.
 
-Ideas that may be revisited in the future:
+Ideas that were evaluated and deliberately rejected (see [ROADMAP.md](ROADMAP.md)
+for full rationale with competitor evidence):
 
-1. Suite-level shared setup (expensive one-time resources)
-2. Context-returning hooks (setup returns values to tests)
-3. Snapshot testing (integrate with `insta` rather than reinvent)
+1. **Suite-level shared setup** — rstest's `#[once]` never drops, breaks
+   nextest. pytest session scopes break in parallel. Use `OnceLock` in user code.
+2. **Lazy bindings (`let`-style)** — RSpec's most debated feature. Creates
+   "mystery guests" where setup is invisible at the point of use.
+3. **Shared examples/contexts** — widely considered an anti-pattern: ghost
+   variables, exponential test growth, debugging nightmares.
+4. **Snapshot testing (built-in)** — "engineers begin blindly updating."
+   Document insta integration instead.
+5. **Fixture injection (pytest-style)** — pytest maintainers acknowledge the
+   indirection and coupling problems at scale.
 
 ## Dependencies
 

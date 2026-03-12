@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-03-12
+
+### Added
+
+- **Test matrix (Cartesian product)** — `matrix [a, b] x [c, d] |p1, p2| { body }` generates tests for all combinations
+  - Supports 2+ dimensions separated by `x`
+  - Generates `case_I_J` (or `case_I_J_K`, etc.) function names from dimension indices
+  - Inherits setup, teardown, tokio, timeout, and focus from parent context
+  - Compatible with `xfail` for expected-failure matrix tests
+- **Named test cases in `each`** — optional string label as first tuple element becomes the test function name
+  - `each [("ok", 200, true), ("not_found", 404, false)] |name, code, ok| { ... }` generates `ok` and `not_found` instead of `case_0` and `case_1`
+  - Labels are slugified to valid Rust identifiers; Rust keywords use raw identifiers (`r#type`)
+  - Falls back to `case_N` when no label is provided
+- **`xfail` keyword** — mark a test as expected-to-fail
+  - Test passes when the body returns `Err`; fails loudly if the body unexpectedly passes
+  - Works on individual tests, `each` blocks, and `matrix` blocks
+  - Catches `Result::Err` (from `expect!` / `?`); panics still propagate as real failures
+  - Cannot be combined with `pending` (compile error)
+  - Cannot be applied to groups (compile error)
+
 ## [0.5.0] - 2026-03-11
 
 ### Added
