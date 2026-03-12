@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-03-12
+
+### Fixed
+
+- Prevent markdown doc-test flakiness in CI by building and linking docs from an isolated target directory
+
 ## [0.6.0] - 2026-03-12
 
 ### Added
@@ -141,4 +147,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `cargo-behave` now forces parseable libtest `pretty` output for report generation and reserves the libtest `--format` flag
 - JUnit output now strips internal `__FOCUS__` / `__PENDING__` prefixes from displayed test names
 
-<!-- [Unreleased]: https://github.com/stateruntime/behave/compare/v0.1.0...HEAD -->
+[Unreleased]: https://github.com/stateruntime/behave/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/stateruntime/behave/compare/v0.6.0...v0.6.1
