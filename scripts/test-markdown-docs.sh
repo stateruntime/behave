@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cargo build --all-features
+DOC_TARGET_DIR="${CARGO_TARGET_DIR:-target}/markdown-docs"
 
-# `find ... -quit` can pick an older `libbehave-*.rlib` built with a different
-# feature set (e.g. default features only), which makes doc-tests flaky.
-# Pick the most recently modified artifact from the `--all-features` build.
-LIB_BEHAVE="$(ls -t target/debug/deps/libbehave-*.rlib 2>/dev/null | head -n 1)"
+# Use a dedicated target dir so this script never reuses `behave` artifacts
+# from other CI steps (e.g. `--no-default-features` test runs).
+cargo build --all-features --target-dir "${DOC_TARGET_DIR}"
+
+LIB_BEHAVE="$(ls -t "${DOC_TARGET_DIR}"/debug/deps/libbehave-*.rlib 2>/dev/null | head -n 1)"
 
 if [ -z "${LIB_BEHAVE}" ]; then
-  echo "error: compiled behave library not found in target/debug/deps" >&2
+  echo "error: compiled behave library not found in ${DOC_TARGET_DIR}/debug/deps" >&2
   exit 1
 fi
 
@@ -23,6 +24,6 @@ for doc in \
   rustdoc \
     --edition=2021 \
     --test "${doc}" \
-    -L dependency=target/debug/deps \
+    -L dependency="${DOC_TARGET_DIR}/debug/deps" \
     --extern "behave=${LIB_BEHAVE}"
 done
