@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-03-12
+
+### Fixed
+
+- Release workflow now skips publishing `behave-macros` when that exact version already exists on crates.io, while still publishing `behave`
+
 ## [0.6.1] - 2026-03-12
 
 ### Fixed
@@ -147,5 +153,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `cargo-behave` now forces parseable libtest `pretty` output for report generation and reserves the libtest `--format` flag
 - JUnit output now strips internal `__FOCUS__` / `__PENDING__` prefixes from displayed test names
 
-[Unreleased]: https://github.com/stateruntime/behave/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/stateruntime/behave/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/stateruntime/behave/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/stateruntime/behave/compare/v0.6.0...v0.6.1
