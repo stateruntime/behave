@@ -3,7 +3,10 @@ set -euo pipefail
 
 cargo build --all-features
 
-LIB_BEHAVE=$(find target/debug/deps -name 'libbehave-*.rlib' -print -quit)
+# `find ... -quit` can pick an older `libbehave-*.rlib` built with a different
+# feature set (e.g. default features only), which makes doc-tests flaky.
+# Pick the most recently modified artifact from the `--all-features` build.
+LIB_BEHAVE="$(ls -t target/debug/deps/libbehave-*.rlib 2>/dev/null | head -n 1)"
 
 if [ -z "${LIB_BEHAVE}" ]; then
   echo "error: compiled behave library not found in target/debug/deps" >&2

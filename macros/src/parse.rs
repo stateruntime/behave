@@ -23,6 +23,8 @@ pub enum BehaveNode {
     Pending(PendingNode),
     /// A parameterized test block generating one test per case.
     Each(EachNode),
+    /// A Cartesian-product parameterized test block.
+    Matrix(MatrixNode),
 }
 
 /// A group node that contains child nodes.
@@ -43,6 +45,8 @@ pub struct TestNode {
     pub label: String,
     pub body: proc_macro2::TokenStream,
     pub focused: bool,
+    /// Whether this test is expected to fail (`xfail` keyword).
+    pub xfail: bool,
 }
 
 /// A pending (ignored) test node.
@@ -51,19 +55,47 @@ pub struct PendingNode {
     pub label: String,
 }
 
+/// A single test case in an `each` block, with an optional label.
+#[derive(Debug)]
+pub struct EachCase {
+    /// Optional human-readable label (used as function name instead of `case_N`).
+    pub label: Option<String>,
+    /// The case expression to bind to parameters.
+    pub expr: Expr,
+}
+
 /// A parameterized test node that generates one test per case.
 #[derive(Debug)]
 pub struct EachNode {
     /// Human-readable label for the generated module.
     pub label: String,
-    /// The list of case expressions (one per generated test).
-    pub cases: Vec<Expr>,
+    /// The list of cases (one per generated test), each with optional name.
+    pub cases: Vec<EachCase>,
     /// Parameter names bound from each case expression.
     pub params: Vec<Ident>,
     /// The test body executed for each case.
     pub body: proc_macro2::TokenStream,
     /// Whether this block was marked with `focus`.
     pub focused: bool,
+    /// Whether this block was marked with `xfail` (expected failure).
+    pub xfail: bool,
+}
+
+/// A Cartesian-product parameterized test block.
+#[derive(Debug)]
+pub struct MatrixNode {
+    /// Human-readable label for the generated module.
+    pub label: String,
+    /// Each dimension is a list of expressions.
+    pub dimensions: Vec<Vec<Expr>>,
+    /// Parameter names bound from the Cartesian product.
+    pub params: Vec<Ident>,
+    /// The test body executed for each combination.
+    pub body: proc_macro2::TokenStream,
+    /// Whether this block was marked with `focus`.
+    pub focused: bool,
+    /// Whether this block was marked with `xfail` (expected failure).
+    pub xfail: bool,
 }
 
 impl Parse for BehaveInput {
@@ -81,10 +113,14 @@ impl Parse for BehaveInput {
 
 fn parse_node(input: ParseStream<'_>) -> Result<BehaveNode> {
     let focused = try_parse_keyword(input, "focus");
+    let xfail = try_parse_keyword(input, "xfail");
     let pending = try_parse_keyword(input, "pending");
 
     if focused && pending {
         return Err(input.error("a test cannot be both `focus` and `pending`"));
+    }
+    if xfail && pending {
+        return Err(input.error("a test cannot be both `xfail` and `pending`"));
     }
 
     let label: LitStr = input.parse()?;
@@ -104,7 +140,7 @@ fn parse_node(input: ParseStream<'_>) -> Result<BehaveNode> {
         return Ok(BehaveNode::Pending(PendingNode { label: label_str }));
     }
 
-    classify_block(&content, label_str, span, focused)
+    classify_block(&content, label_str, span, focused, xfail)
 }
 
 fn classify_block(
@@ -112,20 +148,40 @@ fn classify_block(
     label: String,
     span: proc_macro2::Span,
     focused: bool,
+    xfail: bool,
 ) -> Result<BehaveNode> {
     if content.is_empty() {
         return Err(syn::Error::new(span, "empty blocks are not allowed"));
     }
 
+    if looks_like_matrix(content) {
+        return parse_matrix_body(content, label, focused, xfail);
+    }
+
     if looks_like_each(content) {
-        return parse_each_body(content, label, focused);
+        return parse_each_body(content, label, focused, xfail);
     }
 
     if looks_like_group(content) {
+        if xfail {
+            return Err(syn::Error::new(
+                span,
+                "xfail cannot be applied to groups, only to tests or `each`/`matrix` blocks",
+            ));
+        }
         parse_group_body(content, label, span, focused)
     } else {
-        parse_test_body(content, label, focused)
+        parse_test_body(content, label, focused, xfail)
     }
+}
+
+/// Peeks ahead to determine if this block starts with `matrix [`.
+fn looks_like_matrix(input: ParseStream<'_>) -> bool {
+    let fork = input.fork();
+    let Ok(id) = fork.parse::<Ident>() else {
+        return false;
+    };
+    id == "matrix" && fork.peek(token::Bracket)
 }
 
 /// Peeks ahead to determine if this block starts with `each [`.
@@ -137,8 +193,90 @@ fn looks_like_each(input: ParseStream<'_>) -> bool {
     id == "each" && fork.peek(token::Bracket)
 }
 
+/// Parses `matrix [a, b] x [c, d] |p1, p2| { body }` into a [`MatrixNode`].
+///
+/// Each dimension is a bracket-delimited list of expressions separated by the
+/// `x` identifier. The parameter count must equal the dimension count.
+fn parse_matrix_body(
+    input: ParseStream<'_>,
+    label: String,
+    focused: bool,
+    xfail: bool,
+) -> Result<BehaveNode> {
+    let _matrix: Ident = input.parse()?;
+    let mut dimensions = Vec::new();
+
+    // Parse first dimension `[a, b, ...]`
+    dimensions.push(parse_dimension(input)?);
+
+    // Parse remaining `x [c, d, ...]` dimensions
+    while input.peek(Ident) {
+        let fork = input.fork();
+        let id: Ident = fork.parse()?;
+        if id != "x" {
+            break;
+        }
+        let _x: Ident = input.parse()?;
+        dimensions.push(parse_dimension(input)?);
+    }
+
+    if dimensions.len() < 2 {
+        return Err(input.error("matrix requires at least 2 dimensions separated by `x`"));
+    }
+
+    // Parse `|param1, param2, ...|`
+    let _pipe1: Token![|] = input.parse()?;
+    let params_punctuated =
+        syn::punctuated::Punctuated::<Ident, Token![,]>::parse_separated_nonempty(input)?;
+    let params: Vec<Ident> = params_punctuated.into_iter().collect();
+    let _pipe2: Token![|] = input.parse()?;
+
+    if params.len() != dimensions.len() {
+        return Err(input.error(format!(
+            "matrix has {} dimensions but {} parameters",
+            dimensions.len(),
+            params.len(),
+        )));
+    }
+
+    // Parse `{ body }`
+    let body_content;
+    braced!(body_content in input);
+    let body: proc_macro2::TokenStream = body_content.parse()?;
+
+    Ok(BehaveNode::Matrix(MatrixNode {
+        label,
+        dimensions,
+        params,
+        body,
+        focused,
+        xfail,
+    }))
+}
+
+/// Parses a single `[expr, expr, ...]` dimension for matrix blocks.
+fn parse_dimension(input: ParseStream<'_>) -> Result<Vec<Expr>> {
+    let content;
+    bracketed!(content in input);
+    let punctuated = syn::punctuated::Punctuated::<Expr, Token![,]>::parse_terminated(&content)?;
+    let exprs: Vec<Expr> = punctuated.into_iter().collect();
+    if exprs.is_empty() {
+        return Err(input.error("matrix dimension must contain at least one value"));
+    }
+    Ok(exprs)
+}
+
 /// Parses `each [cases] |params| { body }` into an [`EachNode`].
-fn parse_each_body(input: ParseStream<'_>, label: String, focused: bool) -> Result<BehaveNode> {
+///
+/// Cases can optionally have a string label as the first tuple element:
+/// `each [("ok", 200, true), ("not_found", 404, false)] |name, code, ok| { ... }`
+/// The label becomes the test function name instead of `case_N`.
+fn parse_each_body(
+    input: ParseStream<'_>,
+    label: String,
+    focused: bool,
+    xfail: bool,
+) -> Result<BehaveNode> {
     // Consume `each`
     let _each: Ident = input.parse()?;
 
@@ -147,11 +285,16 @@ fn parse_each_body(input: ParseStream<'_>, label: String, focused: bool) -> Resu
     bracketed!(cases_content in input);
     let punctuated =
         syn::punctuated::Punctuated::<Expr, Token![,]>::parse_terminated(&cases_content)?;
-    let cases: Vec<Expr> = punctuated.into_iter().collect();
+    let raw_cases: Vec<Expr> = punctuated.into_iter().collect();
 
-    if cases.is_empty() {
+    if raw_cases.is_empty() {
         return Err(input.error("each block must contain at least one case"));
     }
+
+    let cases = raw_cases
+        .into_iter()
+        .map(extract_named_case)
+        .collect::<Result<Vec<_>>>()?;
 
     // Parse `|param1, param2, ...|`
     let _pipe1: Token![|] = input.parse()?;
@@ -171,7 +314,55 @@ fn parse_each_body(input: ParseStream<'_>, label: String, focused: bool) -> Resu
         params,
         body,
         focused,
+        xfail,
     }))
+}
+
+/// Checks if a case expression is a tuple whose first element is a string
+/// literal. If so, extracts the label and rebuilds the expression without it.
+fn extract_named_case(expr: Expr) -> Result<EachCase> {
+    if let Expr::Tuple(ref tuple) = expr {
+        if let Some(Expr::Lit(syn::ExprLit {
+            lit: syn::Lit::Str(lit_str),
+            ..
+        })) = tuple.elems.first()
+        {
+            let label = lit_str.value();
+            let mut rest = tuple.elems.iter().skip(1).cloned();
+            let Some(first_value) = rest.next() else {
+                return Err(syn::Error::new_spanned(
+                    tuple,
+                    "named each case must have at least one value after the label",
+                ));
+            };
+
+            // Single remaining value: unwrap from tuple.
+            let Some(second_value) = rest.next() else {
+                return Ok(EachCase {
+                    label: Some(label),
+                    expr: first_value,
+                });
+            };
+
+            // Multiple remaining values: rebuild as tuple.
+            let mut elems = syn::punctuated::Punctuated::new();
+            elems.push(first_value);
+            elems.push(second_value);
+            for val in rest {
+                elems.push(val);
+            }
+            let new_tuple = syn::ExprTuple {
+                attrs: tuple.attrs.clone(),
+                paren_token: tuple.paren_token,
+                elems,
+            };
+            return Ok(EachCase {
+                label: Some(label),
+                expr: Expr::Tuple(new_tuple),
+            });
+        }
+    }
+    Ok(EachCase { label: None, expr })
 }
 
 /// Peeks ahead to determine if this block contains child groups
@@ -210,7 +401,7 @@ fn looks_like_group(input: ParseStream<'_>) -> bool {
             }
             continue;
         }
-        if id == "focus" || id == "pending" {
+        if id == "focus" || id == "pending" || id == "xfail" {
             let _ = fork.parse::<syn::Ident>();
             return fork.peek(LitStr);
         }
@@ -230,7 +421,7 @@ fn peek_keyword(input: ParseStream<'_>, keyword: &str) -> bool {
     }
     let fork = input.fork();
     fork.parse::<syn::Ident>()
-        .map_or(false, |id| id == keyword && fork.peek(token::Brace))
+        .is_ok_and(|id| id == keyword && fork.peek(token::Brace))
 }
 
 fn parse_group_body(
@@ -281,12 +472,18 @@ fn parse_group_body(
     }))
 }
 
-fn parse_test_body(content: ParseStream<'_>, label: String, focused: bool) -> Result<BehaveNode> {
+fn parse_test_body(
+    content: ParseStream<'_>,
+    label: String,
+    focused: bool,
+    xfail: bool,
+) -> Result<BehaveNode> {
     let body: proc_macro2::TokenStream = content.parse()?;
     Ok(BehaveNode::Test(TestNode {
         label,
         body,
         focused,
+        xfail,
     }))
 }
 
@@ -389,6 +586,7 @@ fn try_parse_keyword(input: ParseStream<'_>, keyword: &str) -> bool {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 mod tests {
     use super::*;
 
@@ -780,21 +978,14 @@ mod tests {
                 }
             }
         };
-        let parsed = parse_input(input);
-        assert!(parsed.is_ok());
-        let group = first_group(parsed);
-        match &group.children[0] {
-            BehaveNode::Each(each) => {
-                assert_eq!(each.label, "addition");
-                assert_eq!(each.cases.len(), 3);
-                assert_eq!(each.params.len(), 3);
-                assert_eq!(each.params[0], "a");
-                assert_eq!(each.params[1], "b");
-                assert_eq!(each.params[2], "expected");
-                assert!(!each.focused);
-            }
-            other => panic!("expected Each node, got {other:?}"),
-        }
+        let each = first_each(parse_input(input));
+        assert_eq!(each.label, "addition");
+        assert_eq!(each.cases.len(), 3);
+        assert_eq!(each.params.len(), 3);
+        assert_eq!(each.params[0], "a");
+        assert_eq!(each.params[1], "b");
+        assert_eq!(each.params[2], "expected");
+        assert!(!each.focused);
     }
 
     #[test]
@@ -806,17 +997,10 @@ mod tests {
                 }
             }
         };
-        let parsed = parse_input(input);
-        assert!(parsed.is_ok());
-        let group = first_group(parsed);
-        match &group.children[0] {
-            BehaveNode::Each(each) => {
-                assert_eq!(each.cases.len(), 5);
-                assert_eq!(each.params.len(), 1);
-                assert_eq!(each.params[0], "n");
-            }
-            other => panic!("expected Each node, got {other:?}"),
-        }
+        let each = first_each(parse_input(input));
+        assert_eq!(each.cases.len(), 5);
+        assert_eq!(each.params.len(), 1);
+        assert_eq!(each.params[0], "n");
     }
 
     #[test]
@@ -838,6 +1022,96 @@ mod tests {
     }
 
     #[test]
+    fn parse_each_named_cases() {
+        let input = quote::quote! {
+            "http status" {
+                each [
+                    ("ok", 200, true),
+                    ("not_found", 404, false),
+                ] |name, code, success| {
+                    let _ = (code, success);
+                }
+            }
+        };
+        let each = first_each(parse_input(input));
+        assert_eq!(each.cases.len(), 2);
+        assert_eq!(each.cases[0].label.as_deref(), Some("ok"));
+        assert_eq!(each.cases[1].label.as_deref(), Some("not_found"));
+        assert_eq!(each.params.len(), 3);
+    }
+
+    #[test]
+    fn parse_each_named_single_value() {
+        let input = quote::quote! {
+            "items" {
+                each [
+                    ("small", 1),
+                    ("large", 100),
+                ] |name, n| {
+                    let _ = n;
+                }
+            }
+        };
+        let each = first_each(parse_input(input));
+        assert_eq!(each.cases[0].label.as_deref(), Some("small"));
+        assert_eq!(each.cases[1].label.as_deref(), Some("large"));
+    }
+
+    #[test]
+    fn parse_each_named_case_without_value_errors() {
+        let input = quote::quote! {
+            "items" {
+                each [
+                    ("empty",),
+                ] |name| {
+                    let _ = name;
+                }
+            }
+        };
+        let parsed = parse_input(input);
+        assert!(parsed.is_err());
+        let msg = parsed.unwrap_err().to_string();
+        assert!(
+            msg.contains("at least one value"),
+            "expected named-case missing value error, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn parse_each_unnamed_cases_preserved() {
+        let input = quote::quote! {
+            "values" {
+                each [
+                    (1, 2),
+                    (3, 4),
+                ] |a, b| {
+                    let _ = a + b;
+                }
+            }
+        };
+        let each = first_each(parse_input(input));
+        assert!(each.cases[0].label.is_none());
+        assert!(each.cases[1].label.is_none());
+    }
+
+    #[test]
+    fn parse_each_mixed_named_unnamed() {
+        let input = quote::quote! {
+            "items" {
+                each [
+                    ("labeled", 1, true),
+                    (2, false),
+                ] |n, flag| {
+                    let _ = (n, flag);
+                }
+            }
+        };
+        let each = first_each(parse_input(input));
+        assert_eq!(each.cases[0].label.as_deref(), Some("labeled"));
+        assert!(each.cases[1].label.is_none());
+    }
+
+    #[test]
     fn parse_each_focused() {
         let input = quote::quote! {
             focus "cases" {
@@ -846,16 +1120,9 @@ mod tests {
                 }
             }
         };
-        let parsed = parse_input(input);
-        assert!(parsed.is_ok());
-        let group = first_group(parsed);
-        assert!(group.focused);
-        match &group.children[0] {
-            BehaveNode::Each(each) => {
-                assert_eq!(each.cases.len(), 2);
-            }
-            other => panic!("expected Each node, got {other:?}"),
-        }
+        let each = first_each(parse_input(input));
+        assert!(each.focused);
+        assert_eq!(each.cases.len(), 2);
     }
 
     #[test]
@@ -954,5 +1221,200 @@ mod tests {
         };
         let group = first_group(parse_input(input));
         assert_eq!(group.timeout_ms, None);
+    }
+
+    // --- xfail tests ---
+
+    #[test]
+    fn parse_xfail_test() {
+        let input = quote::quote! {
+            xfail "expected failure" {
+                let x = 1;
+            }
+        };
+        let test = first_test(parse_input(input));
+        assert!(test.xfail);
+        assert!(!test.focused);
+        assert_eq!(test.label, "expected failure");
+    }
+
+    #[test]
+    fn parse_xfail_each() {
+        let input = quote::quote! {
+            xfail "broken cases" {
+                each [1, 2] |n| {
+                    let _ = n;
+                }
+            }
+        };
+        let each = first_each(parse_input(input));
+        assert!(each.xfail);
+        assert_eq!(each.cases.len(), 2);
+    }
+
+    #[test]
+    fn parse_xfail_group_errors() {
+        let input = quote::quote! {
+            xfail "suite" {
+                "test" {
+                    let x = 1;
+                }
+            }
+        };
+        let parsed = parse_input(input);
+        assert!(parsed.is_err());
+        let msg = parsed.unwrap_err().to_string();
+        assert!(
+            msg.contains("xfail cannot be applied to groups"),
+            "expected xfail-group error, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn parse_xfail_pending_errors() {
+        let input = quote::quote! {
+            xfail pending "both" {
+                let x = 1;
+            }
+        };
+        let parsed = parse_input(input);
+        assert!(parsed.is_err());
+    }
+
+    #[test]
+    fn parse_non_xfail_test_has_xfail_false() {
+        let input = quote::quote! {
+            "normal test" {
+                let x = 1;
+            }
+        };
+        let test = first_test(parse_input(input));
+        assert!(!test.xfail);
+    }
+
+    // --- matrix tests ---
+
+    /// Unwrap a successful parse and return the first node as a Matrix.
+    fn first_matrix(input: Result<BehaveInput>) -> MatrixNode {
+        let parsed = input.expect("parse should succeed");
+        match parsed.nodes.into_iter().next() {
+            Some(BehaveNode::Matrix(m)) => m,
+            other => panic!("expected Matrix node, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_matrix_basic() {
+        let input = quote::quote! {
+            "combos" {
+                matrix [1, 2] x [10, 20] |a, b| {
+                    let _ = a + b;
+                }
+            }
+        };
+        let matrix = first_matrix(parse_input(input));
+        assert_eq!(matrix.label, "combos");
+        assert_eq!(matrix.dimensions.len(), 2);
+        assert_eq!(matrix.dimensions[0].len(), 2);
+        assert_eq!(matrix.dimensions[1].len(), 2);
+        assert_eq!(matrix.params.len(), 2);
+        assert_eq!(matrix.params[0], "a");
+        assert_eq!(matrix.params[1], "b");
+        assert!(!matrix.focused);
+        assert!(!matrix.xfail);
+    }
+
+    #[test]
+    fn parse_matrix_three_dimensions() {
+        let input = quote::quote! {
+            "3d" {
+                matrix [1, 2] x ["a", "b"] x [true, false] |n, s, b| {
+                    let _ = (n, s, b);
+                }
+            }
+        };
+        let matrix = first_matrix(parse_input(input));
+        assert_eq!(matrix.dimensions.len(), 3);
+        assert_eq!(matrix.params.len(), 3);
+    }
+
+    #[test]
+    fn parse_matrix_single_dimension_errors() {
+        let input = quote::quote! {
+            "single" {
+                matrix [1, 2] |n| {
+                    let _ = n;
+                }
+            }
+        };
+        let parsed = parse_input(input);
+        assert!(parsed.is_err());
+        let msg = parsed.unwrap_err().to_string();
+        assert!(
+            msg.contains("at least 2 dimensions"),
+            "expected dimension count error, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn parse_matrix_param_mismatch_errors() {
+        let input = quote::quote! {
+            "mismatch" {
+                matrix [1, 2] x [10, 20] |a, b, c| {
+                    let _ = (a, b, c);
+                }
+            }
+        };
+        let parsed = parse_input(input);
+        assert!(parsed.is_err());
+        let msg = parsed.unwrap_err().to_string();
+        assert!(
+            msg.contains("2 dimensions but 3 parameters"),
+            "expected param mismatch error, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn parse_matrix_empty_dimension_errors() {
+        let input = quote::quote! {
+            "empty" {
+                matrix [] x [1] |a, b| {
+                    let _ = (a, b);
+                }
+            }
+        };
+        let parsed = parse_input(input);
+        assert!(parsed.is_err());
+        let msg = parsed.unwrap_err().to_string();
+        assert!(
+            msg.contains("at least one value"),
+            "expected empty dimension error, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn parse_matrix_focused() {
+        let input = quote::quote! {
+            focus "focused combos" {
+                matrix [1, 2] x [10, 20] |a, b| {
+                    let _ = a + b;
+                }
+            }
+        };
+        let matrix = first_matrix(parse_input(input));
+        assert!(matrix.focused);
+    }
+
+    #[test]
+    fn parse_matrix_xfail() {
+        let input = quote::quote! {
+            xfail "broken combos" {
+                matrix [1, 2] x [10, 20] |a, b| {
+                    let _ = a + b;
+                }
+            }
+        };
+        let matrix = first_matrix(parse_input(input));
+        assert!(matrix.xfail);
     }
 }
