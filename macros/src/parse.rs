@@ -4,7 +4,7 @@
 //! groups (describe blocks) and tests (leaf blocks).
 
 use syn::parse::{Parse, ParseStream};
-use syn::{braced, bracketed, token, Expr, Ident, LitStr, Result, Token};
+use syn::{braced, bracketed, token, Expr, Ident, LitInt, LitStr, Result, Token};
 
 /// Root AST node containing all top-level groups.
 #[derive(Debug)]
@@ -33,6 +33,7 @@ pub struct GroupNode {
     pub setup: Option<proc_macro2::TokenStream>,
     pub teardown: Option<proc_macro2::TokenStream>,
     pub async_runtime: bool,
+    pub timeout_ms: Option<u64>,
     pub focused: bool,
 }
 
@@ -176,9 +177,9 @@ fn parse_each_body(input: ParseStream<'_>, label: String, focused: bool) -> Resu
 /// Peeks ahead to determine if this block contains child groups
 /// (string literal followed by braces) or test code.
 ///
-/// Skips any combination of `tokio;`, `setup {}`, and `teardown {}`
-/// prefixes. Validation of ordering and duplicates happens later in
-/// [`parse_group_body`].
+/// Skips any combination of `tokio;`, `timeout <int>;`, `setup {}`, and
+/// `teardown {}` prefixes. Validation of ordering and duplicates happens
+/// later in [`parse_group_body`].
 fn looks_like_group(input: ParseStream<'_>) -> bool {
     let fork = input.fork();
 
@@ -193,6 +194,12 @@ fn looks_like_group(input: ParseStream<'_>) -> bool {
 
         if id == "tokio" && inner.peek(syn::Token![;]) {
             let _ = fork.parse::<syn::Ident>();
+            let _ = fork.parse::<syn::Token![;]>();
+            continue;
+        }
+        if id == "timeout" && inner.peek(LitInt) {
+            let _ = fork.parse::<syn::Ident>();
+            let _ = fork.parse::<LitInt>();
             let _ = fork.parse::<syn::Token![;]>();
             continue;
         }
@@ -233,6 +240,7 @@ fn parse_group_body(
     focused: bool,
 ) -> Result<BehaveNode> {
     let async_runtime = try_parse_async_runtime(content)?;
+    let timeout_ms = try_parse_timeout(content)?;
     let setup = try_parse_setup(content)?;
     let teardown = try_parse_teardown(content)?;
 
@@ -268,6 +276,7 @@ fn parse_group_body(
         setup,
         teardown,
         async_runtime,
+        timeout_ms,
         focused,
     }))
 }
@@ -334,6 +343,35 @@ fn try_parse_async_runtime(input: ParseStream<'_>) -> Result<bool> {
     let _ident: syn::Ident = input.parse()?;
     let _semi: syn::Token![;] = input.parse()?;
     Ok(true)
+}
+
+/// Tries to consume `timeout <integer>;` from the input stream.
+///
+/// Returns `Some(ms)` if the keyword was present, `None` otherwise.
+/// Rejects `timeout 0;` at parse time with a compile error.
+fn try_parse_timeout(input: ParseStream<'_>) -> Result<Option<u64>> {
+    if !input.peek(syn::Ident) {
+        return Ok(None);
+    }
+
+    let fork = input.fork();
+    let ident: syn::Ident = fork.parse()?;
+    if ident != "timeout" || !fork.peek(LitInt) {
+        return Ok(None);
+    }
+
+    // Consume from real stream
+    let _ident: syn::Ident = input.parse()?;
+    let lit: LitInt = input.parse()?;
+    let ms: u64 = lit.base10_parse()?;
+    if ms == 0 {
+        return Err(syn::Error::new(
+            lit.span(),
+            "timeout must be greater than 0",
+        ));
+    }
+    let _semi: syn::Token![;] = input.parse()?;
+    Ok(Some(ms))
 }
 
 fn try_parse_keyword(input: ParseStream<'_>, keyword: &str) -> bool {
@@ -831,5 +869,90 @@ mod tests {
         };
         let parsed = parse_input(input);
         assert!(parsed.is_ok());
+    }
+
+    #[test]
+    fn parse_timeout() {
+        let input = quote::quote! {
+            "suite" {
+                timeout 5000;
+
+                "test" {
+                    let x = 1;
+                }
+            }
+        };
+        let group = first_group(parse_input(input));
+        assert_eq!(group.timeout_ms, Some(5000));
+    }
+
+    #[test]
+    fn parse_timeout_with_tokio() {
+        let input = quote::quote! {
+            "suite" {
+                tokio;
+                timeout 1000;
+
+                "test" {
+                    let x = 1;
+                }
+            }
+        };
+        let group = first_group(parse_input(input));
+        assert!(group.async_runtime);
+        assert_eq!(group.timeout_ms, Some(1000));
+    }
+
+    #[test]
+    fn parse_timeout_zero_errors() {
+        let input = quote::quote! {
+            "suite" {
+                timeout 0;
+
+                "test" {
+                    let x = 1;
+                }
+            }
+        };
+        let parsed = parse_input(input);
+        assert!(parsed.is_err());
+        let msg = parsed.unwrap_err().to_string();
+        assert!(
+            msg.contains("greater than 0"),
+            "expected timeout > 0 error, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn parse_timeout_with_setup() {
+        let input = quote::quote! {
+            "suite" {
+                timeout 2000;
+
+                setup {
+                    let x = 1;
+                }
+
+                "test" {
+                    let _ = x;
+                }
+            }
+        };
+        let group = first_group(parse_input(input));
+        assert_eq!(group.timeout_ms, Some(2000));
+        assert!(group.setup.is_some());
+    }
+
+    #[test]
+    fn parse_no_timeout() {
+        let input = quote::quote! {
+            "suite" {
+                "test" {
+                    let x = 1;
+                }
+            }
+        };
+        let group = first_group(parse_input(input));
+        assert_eq!(group.timeout_ms, None);
     }
 }

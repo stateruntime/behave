@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-03-11
+
+### Added
+
+- **Soft assertions** — collect multiple failures in a single test and report them together at the end
+  - `SoftErrors::new()` creates a collector, `.check()` records results, `.finish()` returns all failures
+  - `SoftMatchError` error type with numbered failure output
+  - Gated on `std` feature, available via `behave::prelude::*`
+- **Test timeout** — `timeout <ms>;` DSL keyword to prevent hanging tests
+  - Sync tests spawn a thread with `recv_timeout` for deadline enforcement
+  - Async tests use `tokio::time::timeout` (requires `tokio` feature)
+  - Timeout inherits through nesting (inner overrides outer)
+  - Teardown still runs inside the spawned thread (sync) or after timeout wrapper (async)
+
 ## [0.4.4] - 2026-03-11
 
 ### Fixed

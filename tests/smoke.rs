@@ -666,6 +666,149 @@ mod hashmap_tests {
     }
 }
 
+#[cfg(feature = "std")]
+mod soft_assertion_tests {
+    use behave::prelude::*;
+
+    behave! {
+        "soft assertions" {
+            "reports success when all checks pass" {
+                let mut errors = SoftErrors::new();
+                errors.check(expect!(1).to_equal(1));
+                errors.check(expect!(true).to_be_true());
+                errors.check(expect!("hello").to_start_with("he"));
+                errors.finish()?;
+            }
+
+            "collects only the failures, ignores successes" {
+                let mut errors = SoftErrors::new();
+                errors.check(expect!(1).to_equal(1));   // pass
+                errors.check(expect!(2).to_equal(99));  // fail
+                errors.check(expect!(3).to_equal(3));   // pass
+                errors.check(expect!(4).to_equal(88));  // fail
+                expect!(errors.len()).to_equal(2)?;
+            }
+
+            "can mix hard and soft assertions in same test" {
+                // Hard assertion first — fails fast if wrong
+                expect!(true).to_be_true()?;
+
+                // Soft assertions in the middle
+                let mut errors = SoftErrors::new();
+                errors.check(expect!(1).to_equal(1));
+                errors.finish()?;
+
+                // Hard assertion after — verifies final state
+                expect!(42).to_equal(42)?;
+            }
+
+            "finish succeeds on empty collector" {
+                let errors = SoftErrors::new();
+                errors.finish()?;
+            }
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+mod timeout_tests {
+    use behave::prelude::*;
+
+    behave! {
+        "timeout" {
+            "basic sync timeout" {
+                timeout 5000;
+
+                "passes when test completes within deadline" {
+                    expect!(1 + 1).to_equal(2)?;
+                }
+            }
+
+            "timeout works with setup" {
+                timeout 5000;
+
+                setup {
+                    let base = 10;
+                }
+
+                "setup variables are accessible" {
+                    expect!(base).to_equal(10)?;
+                }
+            }
+
+            "timeout works with setup and teardown" {
+                timeout 5000;
+
+                setup {
+                    let val = 42;
+                }
+
+                teardown {
+                    let _ = val;
+                }
+
+                "teardown can access setup variables" {
+                    expect!(val).to_equal(42)?;
+                }
+            }
+
+            "timeout inherits to child groups" {
+                timeout 5000;
+
+                "inner group without timeout declaration" {
+                    "still enforces parent timeout" {
+                        expect!(true).to_be_true()?;
+                    }
+                }
+            }
+
+            "inner timeout overrides outer timeout" {
+                timeout 10000;
+
+                "stricter inner group" {
+                    timeout 5000;
+
+                    "uses the inner 5s timeout" {
+                        expect!(true).to_be_true()?;
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(feature = "tokio")]
+mod async_timeout_tests {
+    use behave::prelude::*;
+
+    behave! {
+        "async timeout" {
+            tokio;
+            timeout 5000;
+
+            "passes when async test completes within deadline" {
+                let val = async { 42 }.await;
+                expect!(val).to_equal(42)?;
+            }
+
+            "async timeout with setup and teardown" {
+                setup {
+                    let val = 99;
+                }
+
+                teardown {
+                    let _ = val;
+                }
+
+                "teardown runs after async body" {
+                    let result = async { val + 1 }.await;
+                    expect!(result).to_equal(100)?;
+                }
+            }
+        }
+    }
+}
+
 mod common;
 
 /// Demonstrates importing shared helpers from `tests/common/mod.rs`.

@@ -23,6 +23,7 @@ struct GenContext<'a> {
     setups: Vec<&'a TokenStream>,
     teardowns: Vec<&'a TokenStream>,
     is_async: bool,
+    timeout_ms: Option<u64>,
 }
 
 /// Generates Rust test code from a parsed [`BehaveInput`].
@@ -35,6 +36,7 @@ pub fn generate(input: BehaveInput) -> syn::Result<TokenStream> {
         setups: Vec::new(),
         teardowns: Vec::new(),
         is_async: false,
+        timeout_ms: None,
     };
     let mut tokens = TokenStream::new();
     for node in input.nodes {
@@ -64,6 +66,7 @@ fn generate_group(group: &GroupNode, ctx: &GenContext<'_>) -> syn::Result<TokenS
         setups: ctx.setups.clone(),
         teardowns: ctx.teardowns.clone(),
         is_async: ctx.is_async || group.async_runtime,
+        timeout_ms: group.timeout_ms.or(ctx.timeout_ms),
     };
     if let Some(ref setup) = group.setup {
         child_ctx.setups.push(setup);
@@ -108,60 +111,253 @@ fn generate_test_fn(
 ) -> TokenStream {
     let setup_tokens: TokenStream = ctx.setups.iter().map(|s| quote! { #s }).collect();
     let has_teardown = !ctx.teardowns.is_empty();
-
-    // Teardowns run in reverse order (innermost first, like destructors)
     let teardown_tokens: TokenStream = ctx.teardowns.iter().rev().map(|t| quote! { #t }).collect();
 
-    match (ctx.is_async, has_teardown) {
-        (false, false) => quote! {
-            #[test]
-            fn #fn_name() -> Result<(), Box<dyn std::error::Error>> {
-                #setup_tokens
-                #extra_setup
+    match (ctx.is_async, has_teardown, ctx.timeout_ms) {
+        (false, false, None) => gen_sync(fn_name, &setup_tokens, extra_setup, body),
+        (false, true, None) => {
+            gen_sync_teardown(fn_name, &setup_tokens, extra_setup, body, &teardown_tokens)
+        }
+        (true, false, None) => gen_async(fn_name, &setup_tokens, extra_setup, body),
+        (true, true, None) => {
+            gen_async_teardown(fn_name, &setup_tokens, extra_setup, body, &teardown_tokens)
+        }
+        (false, false, Some(ms)) => gen_sync_timeout(fn_name, &setup_tokens, extra_setup, body, ms),
+        (false, true, Some(ms)) => gen_sync_teardown_timeout(
+            fn_name,
+            &setup_tokens,
+            extra_setup,
+            body,
+            &teardown_tokens,
+            ms,
+        ),
+        (true, false, Some(ms)) => gen_async_timeout(fn_name, &setup_tokens, extra_setup, body, ms),
+        (true, true, Some(ms)) => gen_async_teardown_timeout(
+            fn_name,
+            &setup_tokens,
+            extra_setup,
+            body,
+            &teardown_tokens,
+            ms,
+        ),
+    }
+}
+
+/// Sync test, no teardown, no timeout.
+fn gen_sync(
+    fn_name: Ident,
+    setup: &TokenStream,
+    extra: &TokenStream,
+    body: &TokenStream,
+) -> TokenStream {
+    quote! {
+        #[test]
+        fn #fn_name() -> Result<(), Box<dyn std::error::Error>> {
+            #setup
+            #extra
+            #body
+            Ok(())
+        }
+    }
+}
+
+/// Sync test with teardown (catch_unwind to guarantee cleanup), no timeout.
+fn gen_sync_teardown(
+    fn_name: Ident,
+    setup: &TokenStream,
+    extra: &TokenStream,
+    body: &TokenStream,
+    teardown: &TokenStream,
+) -> TokenStream {
+    quote! {
+        #[test]
+        fn #fn_name() -> Result<(), Box<dyn std::error::Error>> {
+            #setup
+            #extra
+            let __behave_test_result = std::panic::catch_unwind(
+                std::panic::AssertUnwindSafe(|| -> Result<(), Box<dyn std::error::Error>> {
+                    #body
+                    Ok(())
+                })
+            );
+            #teardown
+            match __behave_test_result {
+                Ok(result) => result,
+                Err(panic) => std::panic::resume_unwind(panic),
+            }
+        }
+    }
+}
+
+/// Async test, no teardown, no timeout.
+fn gen_async(
+    fn_name: Ident,
+    setup: &TokenStream,
+    extra: &TokenStream,
+    body: &TokenStream,
+) -> TokenStream {
+    quote! {
+        #[tokio::test]
+        async fn #fn_name() -> Result<(), Box<dyn std::error::Error>> {
+            #setup
+            #extra
+            #body
+            Ok(())
+        }
+    }
+}
+
+/// Async test with teardown (runs after async body completes), no timeout.
+fn gen_async_teardown(
+    fn_name: Ident,
+    setup: &TokenStream,
+    extra: &TokenStream,
+    body: &TokenStream,
+    teardown: &TokenStream,
+) -> TokenStream {
+    quote! {
+        #[tokio::test]
+        async fn #fn_name() -> Result<(), Box<dyn std::error::Error>> {
+            #setup
+            #extra
+            let __behave_test_result: Result<(), Box<dyn std::error::Error>> = async {
                 #body
                 Ok(())
+            }.await;
+            #teardown
+            __behave_test_result
+        }
+    }
+}
+
+/// Sync test with timeout, no teardown. Spawns a thread and waits with `recv_timeout`.
+fn gen_sync_timeout(
+    fn_name: Ident,
+    setup: &TokenStream,
+    extra: &TokenStream,
+    body: &TokenStream,
+    ms: u64,
+) -> TokenStream {
+    let err_msg = format!("test timed out after {ms}ms");
+    quote! {
+        #[test]
+        fn #fn_name() -> Result<(), Box<dyn std::error::Error>> {
+            let (__behave_tx, __behave_rx) = std::sync::mpsc::channel::<Result<(), String>>();
+            std::thread::spawn(move || {
+                let __behave_r: Result<(), Box<dyn std::error::Error>> = (|| {
+                    #setup
+                    #extra
+                    #body
+                    Ok(())
+                })();
+                let _ = __behave_tx.send(__behave_r.map_err(|e| e.to_string()));
+            });
+            match __behave_rx.recv_timeout(std::time::Duration::from_millis(#ms)) {
+                Ok(Ok(())) => Ok(()),
+                Ok(Err(msg)) => Err(msg.into()),
+                Err(_) => Err(#err_msg.into()),
             }
-        },
-        (false, true) => quote! {
-            #[test]
-            fn #fn_name() -> Result<(), Box<dyn std::error::Error>> {
-                #setup_tokens
-                #extra_setup
-                let __behave_test_result = std::panic::catch_unwind(
+        }
+    }
+}
+
+/// Sync test with teardown and timeout. Setup + body + teardown all run inside
+/// the spawned thread so teardown can access setup variables.
+fn gen_sync_teardown_timeout(
+    fn_name: Ident,
+    setup: &TokenStream,
+    extra: &TokenStream,
+    body: &TokenStream,
+    teardown: &TokenStream,
+    ms: u64,
+) -> TokenStream {
+    let err_msg = format!("test timed out after {ms}ms");
+    quote! {
+        #[test]
+        fn #fn_name() -> Result<(), Box<dyn std::error::Error>> {
+            let (__behave_tx, __behave_rx) = std::sync::mpsc::channel::<Result<(), String>>();
+            std::thread::spawn(move || {
+                #setup
+                #extra
+                let __behave_r = std::panic::catch_unwind(
                     std::panic::AssertUnwindSafe(|| -> Result<(), Box<dyn std::error::Error>> {
                         #body
                         Ok(())
                     })
                 );
-                #teardown_tokens
-                match __behave_test_result {
-                    Ok(result) => result,
-                    Err(panic) => std::panic::resume_unwind(panic),
-                }
+                #teardown
+                let __behave_final = match __behave_r {
+                    Ok(result) => result.map_err(|e| e.to_string()),
+                    Err(_) => Err("test panicked".to_string()),
+                };
+                let _ = __behave_tx.send(__behave_final);
+            });
+            match __behave_rx.recv_timeout(std::time::Duration::from_millis(#ms)) {
+                Ok(Ok(())) => Ok(()),
+                Ok(Err(msg)) => Err(msg.into()),
+                Err(_) => Err(#err_msg.into()),
             }
-        },
-        (true, false) => quote! {
-            #[tokio::test]
-            async fn #fn_name() -> Result<(), Box<dyn std::error::Error>> {
-                #setup_tokens
-                #extra_setup
-                #body
-                Ok(())
-            }
-        },
-        (true, true) => quote! {
-            #[tokio::test]
-            async fn #fn_name() -> Result<(), Box<dyn std::error::Error>> {
-                #setup_tokens
-                #extra_setup
-                let __behave_test_result: Result<(), Box<dyn std::error::Error>> = async {
+        }
+    }
+}
+
+/// Async test with timeout, no teardown. Wraps body in `tokio::time::timeout`.
+fn gen_async_timeout(
+    fn_name: Ident,
+    setup: &TokenStream,
+    extra: &TokenStream,
+    body: &TokenStream,
+    ms: u64,
+) -> TokenStream {
+    let err_msg = format!("test timed out after {ms}ms");
+    quote! {
+        #[tokio::test]
+        async fn #fn_name() -> Result<(), Box<dyn std::error::Error>> {
+            #setup
+            #extra
+            match tokio::time::timeout(
+                std::time::Duration::from_millis(#ms),
+                async {
                     #body
-                    Ok(())
-                }.await;
-                #teardown_tokens
-                __behave_test_result
+                    Ok::<(), Box<dyn std::error::Error>>(())
+                }
+            ).await {
+                Ok(result) => result,
+                Err(_) => Err(#err_msg.into()),
             }
-        },
+        }
+    }
+}
+
+/// Async test with teardown and timeout. Teardown runs after the timeout
+/// wrapper so cleanup happens regardless of whether the body timed out.
+fn gen_async_teardown_timeout(
+    fn_name: Ident,
+    setup: &TokenStream,
+    extra: &TokenStream,
+    body: &TokenStream,
+    teardown: &TokenStream,
+    ms: u64,
+) -> TokenStream {
+    let err_msg = format!("test timed out after {ms}ms");
+    quote! {
+        #[tokio::test]
+        async fn #fn_name() -> Result<(), Box<dyn std::error::Error>> {
+            #setup
+            #extra
+            let __behave_test_result = match tokio::time::timeout(
+                std::time::Duration::from_millis(#ms),
+                async {
+                    #body
+                    Ok::<(), Box<dyn std::error::Error>>(())
+                }
+            ).await {
+                Ok(result) => result,
+                Err(_) => Err(#err_msg.into()),
+            };
+            #teardown
+            __behave_test_result
+        }
     }
 }
 
@@ -474,6 +670,97 @@ mod tests {
             code.contains("__FOCUS__"),
             "expected __FOCUS__ prefix in: {code}"
         );
+    }
+
+    #[test]
+    fn generates_sync_timeout() {
+        let input = quote::quote! {
+            "suite" {
+                timeout 5000;
+
+                "test" {
+                    let x = 1;
+                }
+            }
+        };
+        let result = parse_and_generate(input);
+        assert!(result.is_ok());
+        let code = result.map(|t| t.to_string()).unwrap_or_default();
+        assert!(
+            code.contains("recv_timeout"),
+            "expected recv_timeout in: {code}"
+        );
+        assert!(code.contains("5000"), "expected timeout value in: {code}");
+    }
+
+    #[test]
+    fn generates_async_timeout() {
+        let input = quote::quote! {
+            "suite" {
+                tokio;
+                timeout 1000;
+
+                "test" {
+                    let x = 1;
+                }
+            }
+        };
+        let result = parse_and_generate(input);
+        assert!(result.is_ok());
+        let code = result.map(|t| t.to_string()).unwrap_or_default();
+        assert!(
+            code.contains("tokio :: time :: timeout"),
+            "expected tokio::time::timeout in: {code}"
+        );
+        assert!(code.contains("1000"), "expected timeout value in: {code}");
+    }
+
+    #[test]
+    fn generates_sync_timeout_with_teardown() {
+        let input = quote::quote! {
+            "suite" {
+                timeout 3000;
+
+                teardown {
+                    cleanup();
+                }
+
+                "test" {
+                    let x = 1;
+                }
+            }
+        };
+        let result = parse_and_generate(input);
+        assert!(result.is_ok());
+        let code = result.map(|t| t.to_string()).unwrap_or_default();
+        assert!(
+            code.contains("recv_timeout"),
+            "expected recv_timeout in: {code}"
+        );
+        assert!(code.contains("cleanup"), "expected teardown in: {code}");
+    }
+
+    #[test]
+    fn generates_timeout_inherits_to_children() {
+        let input = quote::quote! {
+            "outer" {
+                timeout 2000;
+
+                "inner" {
+                    "test" {
+                        let x = 1;
+                    }
+                }
+            }
+        };
+        let result = parse_and_generate(input);
+        assert!(result.is_ok());
+        let code = result.map(|t| t.to_string()).unwrap_or_default();
+        assert!(
+            code.contains("recv_timeout"),
+            "expected inherited timeout in: {code}"
+        );
+        assert!(code.contains("2000"), "expected timeout value in: {code}");
     }
 
     #[test]

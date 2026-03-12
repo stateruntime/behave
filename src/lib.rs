@@ -91,6 +91,9 @@
 //! | `.to_contain_key(k)` | Map has key |
 //! | `.to_contain_value(v)` | Map has value |
 //! | `.to_contain_entry(k, v)` | Map has key-value pair |
+//! | **Soft Assertions** ([`SoftErrors`]) | |
+//! | [`SoftErrors::check`] | Collect result without stopping |
+//! | [`SoftErrors::finish`] | Report all collected failures |
 //!
 //! ## Negation
 //!
@@ -126,6 +129,7 @@
 //! - **`pending "name" { ... }`** — mark tests as ignored
 //! - **`focus "name" { ... }`** — mark tests with a __FOCUS__ prefix in generated names
 //! - **`tokio;`** — generate async tests *(requires `tokio` feature)*
+//! - **`timeout <ms>;`** — fail tests that exceed a deadline (inherits through nesting)
 //!
 //! ## Feature Flags
 //!
@@ -142,6 +146,8 @@ mod custom;
 mod error;
 mod expectation;
 mod matchers;
+#[cfg(feature = "std")]
+mod soft;
 
 #[cfg(feature = "cli")]
 pub mod cli;
@@ -150,6 +156,9 @@ pub use behave_macros::behave;
 pub use custom::BehaveMatch;
 pub use error::MatchError;
 pub use expectation::Expectation;
+#[cfg(feature = "std")]
+#[cfg_attr(docsrs, doc(cfg(feature = "std")))]
+pub use soft::{SoftErrors, SoftMatchError};
 
 /// Creates an [`Expectation`] capturing the expression and its value.
 ///
@@ -267,6 +276,9 @@ pub mod prelude {
     pub use crate::error::MatchError;
     pub use crate::expectation::Expectation;
     pub use crate::{behave, expect};
+
+    #[cfg(feature = "std")]
+    pub use crate::soft::{SoftErrors, SoftMatchError};
 
     #[cfg(feature = "std")]
     pub use crate::{expect_no_panic, expect_panic};
