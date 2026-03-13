@@ -4,7 +4,7 @@
 //! groups (describe blocks) and tests (leaf blocks).
 
 use syn::parse::{Parse, ParseStream};
-use syn::{braced, bracketed, token, Expr, Ident, LitInt, LitStr, Result, Token};
+use syn::{braced, bracketed, token, Expr, Ident, LitInt, LitStr, Result, Token, Type};
 
 /// Root AST node containing all top-level groups.
 #[derive(Debug)]
@@ -25,6 +25,8 @@ pub enum BehaveNode {
     Each(EachNode),
     /// A Cartesian-product parameterized test block.
     Matrix(MatrixNode),
+    /// A typed test block generating tests for each type.
+    EachType(EachTypeNode),
 }
 
 /// A group node that contains child nodes.
@@ -106,6 +108,29 @@ pub struct MatrixNode {
     pub tags: Vec<String>,
 }
 
+/// A typed test block that generates tests for each type in the list.
+#[derive(Debug)]
+pub struct EachTypeNode {
+    /// Human-readable label for the generated module.
+    pub label: String,
+    /// The list of types to generate tests for.
+    pub types: Vec<Type>,
+    /// Child nodes inside the block (tests, groups, each, matrix, etc.).
+    pub children: Vec<BehaveNode>,
+    /// Optional setup block.
+    pub setup: Option<proc_macro2::TokenStream>,
+    /// Optional teardown block.
+    pub teardown: Option<proc_macro2::TokenStream>,
+    /// Whether async runtime is enabled.
+    pub async_runtime: bool,
+    /// Optional timeout in milliseconds.
+    pub timeout_ms: Option<u64>,
+    /// Whether this block was marked with `focus`.
+    pub focused: bool,
+    /// Tags applied to this block.
+    pub tags: Vec<String>,
+}
+
 impl Parse for BehaveInput {
     fn parse(input: ParseStream<'_>) -> Result<Self> {
         let mut nodes = Vec::new();
@@ -167,6 +192,16 @@ fn classify_block(
 
     if looks_like_matrix(content) {
         return parse_matrix_body(content, label, focused, xfail, tags);
+    }
+
+    if looks_like_each_type(content) {
+        if xfail {
+            return Err(syn::Error::new(
+                span,
+                "xfail cannot be applied to each_type blocks, only to tests or `each`/`matrix` blocks",
+            ));
+        }
+        return parse_each_type_body(content, label, focused, tags);
     }
 
     if looks_like_each(content) {
@@ -250,6 +285,66 @@ fn looks_like_each(input: ParseStream<'_>) -> bool {
         return false;
     };
     id == "each" && fork.peek(token::Bracket)
+}
+
+/// Peeks ahead to determine if this block starts with `each_type [`.
+fn looks_like_each_type(input: ParseStream<'_>) -> bool {
+    let fork = input.fork();
+    let Ok(id) = fork.parse::<Ident>() else {
+        return false;
+    };
+    id == "each_type" && fork.peek(token::Bracket)
+}
+
+/// Parses `each_type [Type1, Type2] { children }` into an [`EachTypeNode`].
+fn parse_each_type_body(
+    input: ParseStream<'_>,
+    label: String,
+    focused: bool,
+    tags: Vec<String>,
+) -> Result<BehaveNode> {
+    let _each_type: Ident = input.parse()?;
+
+    // Parse `[Type1, Type2, ...]`
+    let types_content;
+    bracketed!(types_content in input);
+    let punctuated =
+        syn::punctuated::Punctuated::<Type, Token![,]>::parse_terminated(&types_content)?;
+    let types: Vec<Type> = punctuated.into_iter().collect();
+
+    if types.is_empty() {
+        return Err(input.error("each_type must contain at least one type"));
+    }
+
+    // Parse `{ inner group body }`
+    let inner;
+    braced!(inner in input);
+
+    let async_runtime = try_parse_async_runtime(&inner)?;
+    let timeout_ms = try_parse_timeout(&inner)?;
+    let setup = try_parse_setup(&inner)?;
+    let teardown = try_parse_teardown(&inner)?;
+
+    let mut children = Vec::new();
+    while !inner.is_empty() {
+        children.push(parse_node(&inner)?);
+    }
+
+    if children.is_empty() {
+        return Err(input.error("each_type block must contain at least one test or group"));
+    }
+
+    Ok(BehaveNode::EachType(EachTypeNode {
+        label,
+        types,
+        children,
+        setup,
+        teardown,
+        async_runtime,
+        timeout_ms,
+        focused,
+        tags,
+    }))
 }
 
 /// Parses `matrix [a, b] x [c, d] |p1, p2| { body }` into a [`MatrixNode`].

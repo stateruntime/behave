@@ -9,6 +9,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-03-13
+
+### Added
+
+- **Float shape matchers** — `to_be_nan()`, `to_be_finite()`, `to_be_infinite()`, `to_be_positive()`, `to_be_negative()` for `f32` and `f64`
+  - NaN fails both positive and negative, `-0.0` fails both, `INFINITY` is positive+infinite
+- **String QoL matchers** — `to_be_empty()`, `to_not_be_empty()`, `to_have_char_count(n)` for `String` and `&str`
+  - `to_have_char_count` counts Unicode scalar values, not bytes
+- **Sequence matchers** — ordered collection assertions for `Vec<T>` and `&[T]`
+  - `to_contain_exactly(&[T])` — exact ordered match
+  - `to_contain_exactly_in_any_order(&[T])` — same elements, any order (handles duplicates)
+  - `to_start_with_elements(&[T])` — prefix match
+  - `to_end_with_elements(&[T])` — suffix match
+  - `to_be_sorted()` — non-descending order
+- **Set matchers** — `HashSet` and `BTreeSet` assertions *(requires `std` feature)*
+  - `to_contain(&T)`, `to_be_empty()`, `to_not_be_empty()`, `to_have_length(n)`
+  - `to_be_subset_of(&Set)`, `to_be_superset_of(&Set)`
+- **Path matchers** — filesystem path assertions for `PathBuf` and `&Path` *(requires `std` feature)*
+  - `to_exist()`, `to_be_a_file()`, `to_be_a_directory()`
+  - `to_have_extension(ext)`, `to_have_file_name(name)`
+- **JSON matchers** — `serde_json::Value` assertions *(requires `json` feature)*
+  - `to_have_field(field)` — key exists in object
+  - `to_have_field_value(field, value)` — key has specific value
+  - `to_be_json_superset_of(expected)` — recursive partial match (like Jest's `toMatchObject`)
+- **HTTP matchers** — status code and header assertions *(requires `http` feature)*
+  - `to_be_success()` (2xx), `to_be_redirect()` (3xx), `to_be_client_error()` (4xx), `to_be_server_error()` (5xx)
+  - `to_have_status_code(code)`, `to_have_header(name)`, `to_have_header_value(name, value)`
+- **URL matchers** — `url::Url` assertions *(requires `url` feature)*
+  - `to_have_scheme(s)`, `to_have_host(h)`, `to_have_path(p)`
+  - `to_have_query_param(key)`, `to_have_query_param_value(key, value)`, `to_have_fragment(f)`
+- **`expect_match!` macro** — pattern matching assertions with optional guard
+  - `expect_match!(expr, Pattern)` and `expect_match!(expr, Pattern if guard)`
+  - Available in prelude
+- **`each_type` DSL keyword** — typed test generation across multiple types
+  - `each_type [i32, f64, u8] { "test" { ... } }` generates a module per type with `type T = ConcreteType;`
+  - Inherits setup, teardown, tokio, timeout, focus, and tags from parent context
+- **New feature flags:** `http`, `url`, `json` for domain-specific matcher packs
+
 ## [0.7.0] - 2026-03-13
 
 ### Added
@@ -198,7 +236,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `cargo-behave` now forces parseable libtest `pretty` output for report generation and reserves the libtest `--format` flag
 - JUnit output now strips internal `__FOCUS__` / `__PENDING__` prefixes from displayed test names
 
-[Unreleased]: https://github.com/stateruntime/behave/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/stateruntime/behave/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/stateruntime/behave/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/stateruntime/behave/compare/v0.6.2...v0.7.0
 [0.6.2]: https://github.com/stateruntime/behave/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/stateruntime/behave/compare/v0.6.0...v0.6.1

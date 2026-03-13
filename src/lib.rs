@@ -72,17 +72,61 @@
 //! | `.to_end_with(s)` | Has suffix |
 //! | `.to_contain_substr(s)` | Contains substring |
 //! | `.to_have_str_length(n)` | Byte length |
+//! | `.to_have_char_count(n)` | Unicode character count |
+//! | `.to_be_empty()` | String is empty |
+//! | `.to_not_be_empty()` | String is non-empty |
 //! | **Floating-Point** | |
 //! | `.to_approximately_equal(v)` | Within default epsilon |
 //! | `.to_approximately_equal_within(v, e)` | Within custom epsilon |
+//! | `.to_be_nan()` | Value is NaN |
+//! | `.to_be_finite()` | Not infinite, not NaN |
+//! | `.to_be_infinite()` | Positive or negative infinity |
+//! | `.to_be_positive()` | Strictly greater than zero |
+//! | `.to_be_negative()` | Strictly less than zero |
+//! | **Sequences** (`Vec<T>`, `&[T]`) | |
+//! | `.to_contain_exactly(&[..])` | Exact ordered match |
+//! | `.to_contain_exactly_in_any_order(&[..])` | Same elements, any order |
+//! | `.to_start_with_elements(&[..])` | Prefix match |
+//! | `.to_end_with_elements(&[..])` | Suffix match |
+//! | `.to_be_sorted()` | Non-descending order |
+//! | **Sets** (`HashSet`, `BTreeSet`) | |
+//! | `.to_contain(&v)` | Set has element |
+//! | `.to_be_subset_of(&set)` | All elements in other set |
+//! | `.to_be_superset_of(&set)` | Contains all from other set |
+//! | **Paths** (`PathBuf`, `&Path`) | |
+//! | `.to_exist()` | Path exists on filesystem |
+//! | `.to_be_a_file()` | Is a regular file |
+//! | `.to_be_a_directory()` | Is a directory |
+//! | `.to_have_extension(ext)` | Has file extension |
+//! | `.to_have_file_name(name)` | Has file name |
 //! | **Regex** *(requires `regex` feature)* | |
 //! | `.to_match_regex(pat)` | Full-string regex match |
 //! | `.to_contain_regex(pat)` | Substring regex match |
+//! | **JSON** *(requires `json` feature)* | |
+//! | `.to_have_field(f)` | Object has key |
+//! | `.to_have_field_value(f, v)` | Key has specific value |
+//! | `.to_be_json_superset_of(v)` | Recursive partial match |
+//! | **HTTP** *(requires `http` feature)* | |
+//! | `.to_be_success()` | Status 2xx |
+//! | `.to_be_redirect()` | Status 3xx |
+//! | `.to_be_client_error()` | Status 4xx |
+//! | `.to_be_server_error()` | Status 5xx |
+//! | `.to_have_status_code(n)` | Exact status code |
+//! | `.to_have_header(name)` | Header present |
+//! | `.to_have_header_value(name, val)` | Header has value |
+//! | **URL** *(requires `url` feature)* | |
+//! | `.to_have_scheme(s)` | URL scheme |
+//! | `.to_have_host(h)` | URL host |
+//! | `.to_have_path(p)` | URL path |
+//! | `.to_have_query_param(k)` | Query param exists |
+//! | `.to_have_query_param_value(k, v)` | Query param has value |
+//! | `.to_have_fragment(f)` | URL fragment |
 //! | **General** | |
 //! | `.to_satisfy(f, desc)` | Custom predicate function |
 //! | `.to_match(m)` | Custom [`BehaveMatch`] impl |
 //! | [`expect_panic!`] | Expression panics |
 //! | [`expect_no_panic!`] | Expression does not panic |
+//! | [`expect_match!`] | Matches a pattern |
 //! | **Composition** ([`combinators`]) | |
 //! | [`all_of`](combinators::all_of) | All matchers must pass |
 //! | [`any_of`](combinators::any_of) | At least one must pass |
@@ -144,6 +188,9 @@
 //! | `color` | No      | ANSI-colored diff output for assertion failures |
 //! | `regex` | No      | `to_match_regex` and `to_contain_regex` matchers |
 //! | `tokio` | No      | Re-exports `tokio` for `tokio;` async test generation |
+//! | `http`  | No      | HTTP status code and header matchers |
+//! | `url`   | No      | URL component matchers |
+//! | `json`  | No      | JSON value matchers |
 
 pub mod combinators;
 mod custom;
@@ -265,6 +312,45 @@ macro_rules! expect_no_panic {
     }};
 }
 
+/// Asserts that an expression matches a pattern, with optional guard.
+///
+/// Use this for `enum` variant checks and destructuring where regular
+/// matchers cannot express the shape. Named `expect_match!` to follow
+/// the existing `expect_panic!` / `expect_no_panic!` convention.
+///
+/// # Examples
+///
+/// ```
+/// use behave::prelude::*;
+///
+/// #[derive(Debug)]
+/// enum Status { Active, Inactive }
+///
+/// fn demo() -> Result<(), behave::MatchError> {
+///     expect_match!(Status::Active, Status::Active)?;
+///     expect_match!(Some(42), Some(v) if *v > 0)?;
+///     Ok(())
+/// }
+///
+/// assert!(demo().is_ok());
+/// ```
+#[macro_export]
+macro_rules! expect_match {
+    ($expr:expr, $($pattern:pat_param)|+ $(if $guard:expr)?) => {{
+        let __behave_val = &$expr;
+        if matches!(__behave_val, $($pattern)|+ $(if $guard)?) {
+            Ok(())
+        } else {
+            Err($crate::MatchError::new(
+                stringify!($expr).to_string(),
+                concat!("to match pattern ", stringify!($($pattern)|+ $(if $guard)?)).to_string(),
+                format!("{:?}", __behave_val),
+                false,
+            ))
+        }
+    }};
+}
+
 /// Conditionally skips a test at runtime with a reason.
 ///
 /// When the condition is `true`, prints a sentinel line and returns early.
@@ -312,7 +398,7 @@ pub mod prelude {
     pub use crate::custom::BehaveMatch;
     pub use crate::error::MatchError;
     pub use crate::expectation::Expectation;
-    pub use crate::{behave, expect};
+    pub use crate::{behave, expect, expect_match};
 
     #[cfg(feature = "std")]
     pub use crate::soft::{SoftErrors, SoftMatchError};

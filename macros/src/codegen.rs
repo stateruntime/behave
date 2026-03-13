@@ -8,7 +8,8 @@ use quote::{format_ident, quote};
 use syn::Expr;
 
 use crate::parse::{
-    BehaveInput, BehaveNode, EachCase, EachNode, GroupNode, MatrixNode, PendingNode, TestNode,
+    BehaveInput, BehaveNode, EachCase, EachNode, EachTypeNode, GroupNode, MatrixNode, PendingNode,
+    TestNode,
 };
 use crate::slug::{is_rust_keyword, slugify};
 
@@ -73,6 +74,7 @@ fn generate_node(node: &BehaveNode, ctx: &GenContext<'_>) -> syn::Result<TokenSt
         BehaveNode::Pending(pending) => Ok(generate_pending(pending)),
         BehaveNode::Each(each) => Ok(generate_each(each, ctx)),
         BehaveNode::Matrix(matrix) => Ok(generate_matrix(matrix, ctx)),
+        BehaveNode::EachType(each_type) => generate_each_type(each_type, ctx),
     }
 }
 
@@ -507,6 +509,57 @@ fn generate_matrix(matrix: &MatrixNode, ctx: &GenContext<'_>) -> TokenStream {
             #case_fns
         }
     }
+}
+
+fn generate_each_type(each_type: &EachTypeNode, ctx: &GenContext<'_>) -> syn::Result<TokenStream> {
+    let slug = slugify(&each_type.label);
+    let mod_name = if each_type.focused || !each_type.tags.is_empty() {
+        build_prefixed_name(&slug, each_type.focused, &each_type.tags)
+    } else {
+        make_ident(&slug)
+    };
+
+    let mut child_ctx = GenContext {
+        setups: ctx.setups.clone(),
+        teardowns: ctx.teardowns.clone(),
+        is_async: ctx.is_async || each_type.async_runtime,
+        timeout_ms: each_type.timeout_ms.or(ctx.timeout_ms),
+    };
+    if let Some(ref setup) = each_type.setup {
+        child_ctx.setups.push(setup);
+    }
+    if let Some(ref teardown) = each_type.teardown {
+        child_ctx.teardowns.push(teardown);
+    }
+
+    let mut children_tokens = TokenStream::new();
+    for child in &each_type.children {
+        children_tokens.extend(generate_node(child, &child_ctx)?);
+    }
+
+    let type_modules: TokenStream = each_type
+        .types
+        .iter()
+        .map(|ty| {
+            let type_slug = slugify(&quote!(#ty).to_string());
+            let type_mod = make_ident(&type_slug);
+            quote! {
+                mod #type_mod {
+                    use super::*;
+                    #[allow(dead_code)]
+                    type T = #ty;
+                    #children_tokens
+                }
+            }
+        })
+        .collect();
+
+    Ok(quote! {
+        mod #mod_name {
+            use super::*;
+            #type_modules
+        }
+    })
 }
 
 /// Computes the Cartesian product of all dimensions as index-expression tuples.
