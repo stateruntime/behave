@@ -289,7 +289,7 @@ pub fn update_and_detect(
                 entry.last_outcome = "fail".to_string();
                 entry.source_hash = current_source_hash.to_string();
             }
-            TestOutcome::Ignored => {
+            TestOutcome::Ignored | TestOutcome::Skipped => {
                 entry.last_outcome = "ignored".to_string();
             }
         }
@@ -483,5 +483,65 @@ mod tests {
         let deserialized: TestHistory = serde_json::from_str(&json).unwrap_or_default();
         assert_eq!(deserialized.tests.len(), 1);
         assert_eq!(deserialized.tests["test::a"].consecutive_passes, 5);
+    }
+
+    #[test]
+    fn skipped_tests_treated_like_ignored() {
+        let mut history = TestHistory::new();
+        history.tests.insert(
+            "test::skip".to_string(),
+            TestEntry {
+                consecutive_passes: 5,
+                last_outcome: "pass".to_string(),
+                source_hash: "hash".to_string(),
+            },
+        );
+
+        let results = vec![TestResult::new(
+            "test::skip".to_string(),
+            TestOutcome::Skipped,
+        )];
+        let config = FlakyDetectionConfig::default();
+
+        let flaky = update_and_detect(&mut history, &results, &config, "hash");
+        assert!(flaky.is_empty());
+        assert_eq!(history.tests["test::skip"].last_outcome, "ignored");
+        // consecutive_passes is NOT reset by skip
+        assert_eq!(history.tests["test::skip"].consecutive_passes, 5);
+    }
+
+    #[test]
+    fn flaky_at_exact_threshold() {
+        let mut history = TestHistory::new();
+        history.tests.insert(
+            "test::edge".to_string(),
+            TestEntry {
+                consecutive_passes: 5,
+                last_outcome: "pass".to_string(),
+                source_hash: "hash".to_string(),
+            },
+        );
+
+        let results = vec![TestResult::new("test::edge".to_string(), TestOutcome::Fail)];
+        let config = FlakyDetectionConfig {
+            consecutive_passes: 5,
+            ..FlakyDetectionConfig::default()
+        };
+
+        let flaky = update_and_detect(&mut history, &results, &config, "hash");
+        assert_eq!(flaky.len(), 1);
+    }
+
+    #[test]
+    fn multiple_passes_accumulate() {
+        let mut history = TestHistory::new();
+        let config = FlakyDetectionConfig::default();
+
+        for _ in 0..3 {
+            let results = vec![TestResult::new("test::a".to_string(), TestOutcome::Pass)];
+            update_and_detect(&mut history, &results, &config, "hash");
+        }
+
+        assert_eq!(history.tests["test::a"].consecutive_passes, 3);
     }
 }

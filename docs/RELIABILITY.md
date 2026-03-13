@@ -76,7 +76,7 @@ For a current competitive snapshot and deep dives, see
 
 1. Start with the quick start in [README.md](../README.md).
 2. Read [USER_GUIDE.md](USER_GUIDE.md) for the DSL model.
-3. Read [MATCHERS.md](MATCHERS.md) for matcher semantics.
+3. Read [docs/matchers/](matchers/README.md) for matcher semantics.
 4. Try [CLI.md](CLI.md) if you want tree output, machine-readable reports, or flaky detection.
 5. Review [tests/smoke.rs](../tests/smoke.rs) for broad behavior coverage.
 

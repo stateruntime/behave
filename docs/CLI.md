@@ -151,10 +151,96 @@ unchanged, the CLI records it as flaky.
 
 Add `.behave/` to `.gitignore`.
 
+## Tag Filtering
+
+Use `--tag` to run only tests with matching tags, and `--exclude-tag` to skip them:
+
+```bash
+cargo behave --tag slow
+cargo behave --exclude-tag flaky
+cargo behave --tag integration --exclude-tag slow
+```
+
+Tags are set in the DSL with the `tag` keyword:
+
+```rust,ignore
+behave! {
+    "database" tag "slow", "integration" {
+        "creates a user" {
+            expect!(true).to_be_true()?;
+        }
+    }
+}
+```
+
+When both `--tag` and `--exclude-tag` are used, exclusion is applied first, then
+inclusion. `--tag` uses union matching: a test matches if it has *any* of the
+specified tags.
+
+Tags are displayed as `[slow, integration]` in tree output and stripped from
+JUnit/JSON names.
+
+## Focus Mode and CI Guard
+
+Run only focused tests:
+
+```bash
+cargo behave --focus
+```
+
+If no tests have a `focus` marker, all tests run. If any do, only focused tests
+run.
+
+Reject focused tests in CI:
+
+```bash
+cargo behave --fail-on-focus
+```
+
+This lists all tests, and if any contain a `__FOCUS__` marker, prints their
+names to stderr and exits non-zero. Use this in CI to prevent focused tests
+from being merged.
+
+`--focus` and `--fail-on-focus` are mutually exclusive.
+
+## Watch Mode
+
+Re-run tests automatically when `.rs` files change:
+
+```bash
+cargo behave --watch
+```
+
+Watch mode:
+
+- watches `src/` and `tests/` recursively for `.rs` file changes
+- debounces rapid changes (200ms)
+- clears the terminal between runs
+- compatible with `--tag`, `--exclude-tag`, `--focus`, and `--output`
+- incompatible with `--fail-on-focus`
+
+## Runtime Conditional Skip
+
+Use `skip_when!` inside a test body to skip at runtime:
+
+```rust,ignore
+behave! {
+    "redis tests" {
+        "requires redis" {
+            skip_when!(std::env::var("REDIS_URL").is_err(), "REDIS_URL not set");
+            expect!(true).to_be_true()?;
+        }
+    }
+}
+```
+
+When `cargo-behave` detects the skip sentinel, it reclassifies the test as
+`Skipped` with the `⊘` symbol in tree output. Without the CLI, the test simply
+passes silently.
+
 ## Important Limits
 
 - the CLI still runs tests with `--all-features`
 - parsing still depends on the `pretty` libtest output shape produced by `cargo-behave`
 - libtest `--format` is reserved by `cargo-behave`
-- `focus` is a marker, not focus-only execution control
 - flaky detection is still heuristic, not a full semantic dependency graph

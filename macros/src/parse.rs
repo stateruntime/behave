@@ -37,6 +37,8 @@ pub struct GroupNode {
     pub async_runtime: bool,
     pub timeout_ms: Option<u64>,
     pub focused: bool,
+    /// Tags applied to this group (inherited through module path).
+    pub tags: Vec<String>,
 }
 
 /// A leaf test node containing code to execute.
@@ -47,6 +49,8 @@ pub struct TestNode {
     pub focused: bool,
     /// Whether this test is expected to fail (`xfail` keyword).
     pub xfail: bool,
+    /// Tags applied to this test.
+    pub tags: Vec<String>,
 }
 
 /// A pending (ignored) test node.
@@ -79,6 +83,8 @@ pub struct EachNode {
     pub focused: bool,
     /// Whether this block was marked with `xfail` (expected failure).
     pub xfail: bool,
+    /// Tags applied to this each block.
+    pub tags: Vec<String>,
 }
 
 /// A Cartesian-product parameterized test block.
@@ -96,6 +102,8 @@ pub struct MatrixNode {
     pub focused: bool,
     /// Whether this block was marked with `xfail` (expected failure).
     pub xfail: bool,
+    /// Tags applied to this matrix block.
+    pub tags: Vec<String>,
 }
 
 impl Parse for BehaveInput {
@@ -127,6 +135,8 @@ fn parse_node(input: ParseStream<'_>) -> Result<BehaveNode> {
     let label_str = label.value();
     let span = label.span();
 
+    let tags = try_parse_tags(input)?;
+
     let content;
     braced!(content in input);
 
@@ -140,7 +150,7 @@ fn parse_node(input: ParseStream<'_>) -> Result<BehaveNode> {
         return Ok(BehaveNode::Pending(PendingNode { label: label_str }));
     }
 
-    classify_block(&content, label_str, span, focused, xfail)
+    classify_block(&content, label_str, span, focused, xfail, tags)
 }
 
 fn classify_block(
@@ -149,17 +159,18 @@ fn classify_block(
     span: proc_macro2::Span,
     focused: bool,
     xfail: bool,
+    tags: Vec<String>,
 ) -> Result<BehaveNode> {
     if content.is_empty() {
         return Err(syn::Error::new(span, "empty blocks are not allowed"));
     }
 
     if looks_like_matrix(content) {
-        return parse_matrix_body(content, label, focused, xfail);
+        return parse_matrix_body(content, label, focused, xfail, tags);
     }
 
     if looks_like_each(content) {
-        return parse_each_body(content, label, focused, xfail);
+        return parse_each_body(content, label, focused, xfail, tags);
     }
 
     if looks_like_group(content) {
@@ -169,10 +180,58 @@ fn classify_block(
                 "xfail cannot be applied to groups, only to tests or `each`/`matrix` blocks",
             ));
         }
-        parse_group_body(content, label, span, focused)
+        parse_group_body(content, label, span, focused, tags)
     } else {
-        parse_test_body(content, label, focused, xfail)
+        parse_test_body(content, label, focused, xfail, tags)
     }
+}
+
+/// Tries to consume `tag "name1", "name2"` from the input stream.
+///
+/// Returns an empty vec if no `tag` keyword is present. Validates that
+/// tag strings are non-empty after slugification.
+fn try_parse_tags(input: ParseStream<'_>) -> Result<Vec<String>> {
+    if !input.peek(syn::Ident) {
+        return Ok(Vec::new());
+    }
+
+    let fork = input.fork();
+    let Ok(ident) = fork.parse::<syn::Ident>() else {
+        return Ok(Vec::new());
+    };
+
+    if ident != "tag" || !fork.peek(LitStr) {
+        return Ok(Vec::new());
+    }
+
+    // Consume `tag` from real stream
+    let _tag: syn::Ident = input.parse()?;
+
+    let mut tags = Vec::new();
+    loop {
+        let lit: LitStr = input.parse()?;
+        let value = lit.value();
+        if value.is_empty() {
+            return Err(syn::Error::new(lit.span(), "tag name must not be empty"));
+        }
+        let slug = crate::slug::slugify(&value);
+        if slug == "_unnamed" {
+            return Err(syn::Error::new(
+                lit.span(),
+                "tag name must contain at least one alphanumeric character",
+            ));
+        }
+        tags.push(value);
+        if !input.peek(Token![,]) || input.peek2(token::Brace) {
+            break;
+        }
+        let _comma: Token![,] = input.parse()?;
+        if !input.peek(LitStr) {
+            break;
+        }
+    }
+
+    Ok(tags)
 }
 
 /// Peeks ahead to determine if this block starts with `matrix [`.
@@ -202,6 +261,7 @@ fn parse_matrix_body(
     label: String,
     focused: bool,
     xfail: bool,
+    tags: Vec<String>,
 ) -> Result<BehaveNode> {
     let _matrix: Ident = input.parse()?;
     let mut dimensions = Vec::new();
@@ -251,6 +311,7 @@ fn parse_matrix_body(
         body,
         focused,
         xfail,
+        tags,
     }))
 }
 
@@ -276,6 +337,7 @@ fn parse_each_body(
     label: String,
     focused: bool,
     xfail: bool,
+    tags: Vec<String>,
 ) -> Result<BehaveNode> {
     // Consume `each`
     let _each: Ident = input.parse()?;
@@ -315,6 +377,7 @@ fn parse_each_body(
         body,
         focused,
         xfail,
+        tags,
     }))
 }
 
@@ -409,10 +472,32 @@ fn looks_like_group(input: ParseStream<'_>) -> bool {
         return false;
     }
 
-    fork.peek(LitStr) && {
-        let _: std::result::Result<LitStr, _> = fork.parse();
-        fork.peek(token::Brace)
+    // After optional prefixes, expect `"label"` then optional `tag "...", "..."` then `{`
+    if !fork.peek(LitStr) {
+        return false;
     }
+    let _: std::result::Result<LitStr, _> = fork.parse();
+
+    // Skip past optional `tag "...", "..."` sequence
+    if fork.peek(syn::Ident) {
+        let inner = fork.fork();
+        if let Ok(id) = inner.parse::<syn::Ident>() {
+            if id == "tag" && inner.peek(LitStr) {
+                let _ = fork.parse::<syn::Ident>();
+                // consume tag string literals separated by commas
+                while fork.peek(LitStr) {
+                    let _ = fork.parse::<LitStr>();
+                    if fork.peek(Token![,]) && !fork.peek2(token::Brace) {
+                        let _ = fork.parse::<Token![,]>();
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    fork.peek(token::Brace)
 }
 
 fn peek_keyword(input: ParseStream<'_>, keyword: &str) -> bool {
@@ -429,6 +514,7 @@ fn parse_group_body(
     label: String,
     span: proc_macro2::Span,
     focused: bool,
+    tags: Vec<String>,
 ) -> Result<BehaveNode> {
     let async_runtime = try_parse_async_runtime(content)?;
     let timeout_ms = try_parse_timeout(content)?;
@@ -469,6 +555,7 @@ fn parse_group_body(
         async_runtime,
         timeout_ms,
         focused,
+        tags,
     }))
 }
 
@@ -477,6 +564,7 @@ fn parse_test_body(
     label: String,
     focused: bool,
     xfail: bool,
+    tags: Vec<String>,
 ) -> Result<BehaveNode> {
     let body: proc_macro2::TokenStream = content.parse()?;
     Ok(BehaveNode::Test(TestNode {
@@ -484,6 +572,7 @@ fn parse_test_body(
         body,
         focused,
         xfail,
+        tags,
     }))
 }
 
@@ -1221,6 +1310,120 @@ mod tests {
         };
         let group = first_group(parse_input(input));
         assert_eq!(group.timeout_ms, None);
+    }
+
+    // --- tag tests ---
+
+    #[test]
+    fn parse_single_tag_on_test() {
+        let input = quote::quote! {
+            "my test" tag "slow" {
+                let x = 1;
+            }
+        };
+        let test = first_test(parse_input(input));
+        assert_eq!(test.tags, vec!["slow"]);
+    }
+
+    #[test]
+    fn parse_multiple_tags() {
+        let input = quote::quote! {
+            "my test" tag "slow", "integration" {
+                let x = 1;
+            }
+        };
+        let test = first_test(parse_input(input));
+        assert_eq!(test.tags, vec!["slow", "integration"]);
+    }
+
+    #[test]
+    fn parse_tag_on_group() {
+        let input = quote::quote! {
+            "suite" tag "integration" {
+                "test" {
+                    let x = 1;
+                }
+            }
+        };
+        let group = first_group(parse_input(input));
+        assert_eq!(group.tags, vec!["integration"]);
+    }
+
+    #[test]
+    fn parse_tag_on_each() {
+        let input = quote::quote! {
+            "cases" tag "unit" {
+                each [1, 2] |n| {
+                    let _ = n;
+                }
+            }
+        };
+        let each = first_each(parse_input(input));
+        assert_eq!(each.tags, vec!["unit"]);
+    }
+
+    #[test]
+    fn parse_tag_on_matrix() {
+        let input = quote::quote! {
+            "combos" tag "slow" {
+                matrix [1, 2] x [3, 4] |a, b| {
+                    let _ = a + b;
+                }
+            }
+        };
+        let matrix = first_matrix(parse_input(input));
+        assert_eq!(matrix.tags, vec!["slow"]);
+    }
+
+    #[test]
+    fn parse_focus_with_tag() {
+        let input = quote::quote! {
+            focus "important" tag "critical" {
+                let x = 1;
+            }
+        };
+        let test = first_test(parse_input(input));
+        assert!(test.focused);
+        assert_eq!(test.tags, vec!["critical"]);
+    }
+
+    #[test]
+    fn parse_xfail_with_tag() {
+        let input = quote::quote! {
+            xfail "broken" tag "known_issue" {
+                let x = 1;
+            }
+        };
+        let test = first_test(parse_input(input));
+        assert!(test.xfail);
+        assert_eq!(test.tags, vec!["known_issue"]);
+    }
+
+    #[test]
+    fn parse_no_tags_backward_compat() {
+        let input = quote::quote! {
+            "simple test" {
+                let x = 1;
+            }
+        };
+        let test = first_test(parse_input(input));
+        assert!(test.tags.is_empty());
+    }
+
+    #[test]
+    fn parse_empty_tag_errors() {
+        let input = quote::quote! {
+            "test" tag "" {
+                let x = 1;
+            }
+        };
+        let parsed = parse_input(input);
+        assert!(parsed.is_err());
+        let msg = parsed.unwrap_err().to_string();
+        assert!(
+            msg.contains("must not be empty"),
+            "expected empty tag error, got: {msg}"
+        );
     }
 
     // --- xfail tests ---

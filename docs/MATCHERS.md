@@ -1,5 +1,8 @@
 # Matcher Reference
 
+Prefer the per-matcher docs in [docs/matchers/](matchers/README.md) when you
+want a single page per matcher (with focused examples and cross-links).
+
 This guide answers three questions for every matcher:
 
 - what it checks

@@ -1,6 +1,6 @@
 [package]
 name = "behave"
-version = "0.6.2"
+version = "0.7.0"
 authors = ["Jan Piotrzkowski <https://github.com/babilonczyk>", "State Runtime <https://github.com/stateruntime>"]
 edition = "2021"
 rust-version = "1.75"
@@ -32,15 +32,16 @@ categories = ["development-tools::testing"]
 [features]
 default = ["std"]
 std = []
-cli = ["dep:clap", "dep:crossterm", "dep:serde", "dep:serde_json", "dep:toml"]
+cli = ["dep:clap", "dep:crossterm", "dep:serde", "dep:serde_json", "dep:toml", "dep:notify"]
 color = ["std", "dep:similar"]
 regex = ["dep:regex"]
 tokio = ["dep:tokio"]
 
 [dependencies]
-behave-macros = { path = "macros", version = "0.6.2" }
+behave-macros = { path = "macros", version = "0.7.0" }
 clap = { version = "4", features = ["derive"], optional = true }
 crossterm = { version = "0.28", optional = true }
+notify = { version = "6.1", optional = true }
 regex = { version = "1", optional = true, default-features = false, features = ["std", "unicode-perl"] }
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }

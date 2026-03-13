@@ -18,9 +18,13 @@ list of unrelated unit tests:
 - nested groups instead of large test modules
 - `setup` blocks that flow into child scenarios
 - `each` blocks for parameterized/table-driven tests
+- `matrix` blocks for Cartesian product test generation
+- `xfail` for expected-failure tests
+- `tag` metadata for grouping and filtering tests
+- `skip_when!` for runtime conditional skipping
 - built-in matchers for equality, strings, collections, options, results, and floats
 - `pending` and `focus` markers for test workflow
-- optional `cargo-behave` CLI for tree, JSON, and JUnit output plus flaky-test detection
+- optional `cargo-behave` CLI with tree/JSON/JUnit output, watch mode, tag filtering, and flaky-test detection
 
 ## How It Works
 
@@ -235,6 +239,18 @@ Run the suite with tree output:
 cargo behave
 ```
 
+Run only tests tagged `slow`:
+
+```bash
+cargo behave --tag slow
+```
+
+Watch for file changes and re-run:
+
+```bash
+cargo behave --watch
+```
+
 Emit a machine-readable report:
 
 ```bash
@@ -252,30 +268,39 @@ cargo behave --output junit
 | `regex` | No | `to_match_regex` and `to_contain_regex` matchers |
 | `tokio` | No | Enables `tokio;` async test generation |
 
+## Macros
+
+| Macro | Description | Docs |
+|-------|-------------|------|
+| [`behave!`](docs/macros/behave.md) | BDD test suite DSL with groups, setup, teardown, each, matrix, tags, and more | [Reference](docs/macros/behave.md) |
+| [`expect!`](docs/macros/expect.md) | Wrap a value for matcher assertions with structured error messages | [Reference](docs/macros/expect.md) |
+| [`expect_panic!`](docs/macros/expect_panic.md) | Assert that an expression panics | [Reference](docs/macros/expect_panic.md) |
+| [`expect_no_panic!`](docs/macros/expect_no_panic.md) | Assert that an expression does not panic | [Reference](docs/macros/expect_no_panic.md) |
+| [`skip_when!`](docs/macros/skip_when.md) | Conditionally skip a test at runtime with a reason | [Reference](docs/macros/skip_when.md) |
+
 ## Matchers
 
 | Category | Matchers |
 |----------|----------|
-| Equality | `to_equal`, `to_not_equal` |
-| Boolean | `to_be_true`, `to_be_false` |
-| Ordering | `to_be_greater_than`, `to_be_less_than`, `to_be_at_least`, `to_be_at_most` |
-| Option | `to_be_some`, `to_be_none`, `to_be_some_with` |
-| Result | `to_be_ok`, `to_be_err`, `to_be_ok_with`, `to_be_err_with` |
-| Collections | `to_contain`, `to_be_empty`, `to_not_be_empty`, `to_have_length`, `to_contain_all_of` |
-| Strings | `to_start_with`, `to_end_with`, `to_contain_substr`, `to_have_str_length` |
-| Float | `to_approximately_equal`, `to_approximately_equal_within` |
-| Panic | `expect_panic!`, `expect_no_panic!` |
-| Predicate | `to_satisfy` |
-| Custom | `to_match` with `BehaveMatch` |
-| Regex *(feature)* | `to_match_regex`, `to_contain_regex` |
-| Map (`HashMap`, `BTreeMap`) | `to_contain_key`, `to_contain_value`, `to_contain_entry`, `to_be_empty`, `to_not_be_empty`, `to_have_length` |
-| Composition | `all_of`, `any_of`, `not_matching` |
+| Equality | [`to_equal`](docs/matchers/to_equal.md), [`to_not_equal`](docs/matchers/to_not_equal.md) |
+| Boolean | [`to_be_true`](docs/matchers/to_be_true.md), [`to_be_false`](docs/matchers/to_be_false.md) |
+| Ordering | [`to_be_greater_than`](docs/matchers/to_be_greater_than.md), [`to_be_less_than`](docs/matchers/to_be_less_than.md), [`to_be_at_least`](docs/matchers/to_be_at_least.md), [`to_be_at_most`](docs/matchers/to_be_at_most.md) |
+| Option | [`to_be_some`](docs/matchers/to_be_some.md), [`to_be_none`](docs/matchers/to_be_none.md), [`to_be_some_with`](docs/matchers/to_be_some_with.md) |
+| Result | [`to_be_ok`](docs/matchers/to_be_ok.md), [`to_be_err`](docs/matchers/to_be_err.md), [`to_be_ok_with`](docs/matchers/to_be_ok_with.md), [`to_be_err_with`](docs/matchers/to_be_err_with.md) |
+| Collections | [`to_contain`](docs/matchers/to_contain.md), [`to_be_empty`](docs/matchers/to_be_empty.md), [`to_not_be_empty`](docs/matchers/to_not_be_empty.md), [`to_have_length`](docs/matchers/to_have_length.md), [`to_contain_all_of`](docs/matchers/to_contain_all_of.md) |
+| Strings | [`to_start_with`](docs/matchers/to_start_with.md), [`to_end_with`](docs/matchers/to_end_with.md), [`to_contain_substr`](docs/matchers/to_contain_substr.md), [`to_have_str_length`](docs/matchers/to_have_str_length.md) |
+| Float | [`to_approximately_equal`](docs/matchers/to_approximately_equal.md), [`to_approximately_equal_within`](docs/matchers/to_approximately_equal_within.md) |
+| Panic | [`expect_panic!`](docs/matchers/expect_panic.md), [`expect_no_panic!`](docs/matchers/expect_no_panic.md) |
+| Predicate | [`to_satisfy`](docs/matchers/to_satisfy.md) |
+| Custom | [`to_match`](docs/matchers/to_match.md) with `BehaveMatch` |
+| Regex *(feature)* | [`to_match_regex`](docs/matchers/to_match_regex.md), [`to_contain_regex`](docs/matchers/to_contain_regex.md) |
+| Map (`HashMap`, `BTreeMap`) | [`to_contain_key`](docs/matchers/to_contain_key.md), [`to_contain_value`](docs/matchers/to_contain_value.md), [`to_contain_entry`](docs/matchers/to_contain_entry.md), [`to_be_empty`](docs/matchers/to_be_empty.md), [`to_not_be_empty`](docs/matchers/to_not_be_empty.md), [`to_have_length`](docs/matchers/to_have_length.md) |
+| Composition | [`all_of`](docs/matchers/all_of.md), [`any_of`](docs/matchers/any_of.md), [`not_matching`](docs/matchers/not_matching.md) |
 
-All matchers respect `.not()`.
+All matchers respect [`.not()` / `.negate()`](docs/matchers/not.md).
 
-The full explanation for every matcher, including what it checks, why you would
-choose it, and a working example for each method, is in
-[docs/MATCHERS.md](docs/MATCHERS.md).
+The matcher docs live in [docs/matchers/](docs/matchers/README.md) with one page
+per matcher (plus a quick index).
 
 ## Real Examples
 
@@ -302,13 +327,17 @@ You can:
 - use `cargo behave` for tree output, filters, and libtest flags
 - use `cargo behave --output json` or `cargo behave --output junit` for CI-friendly reports
 - use `cargo behave --manifest-path path/to/Cargo.toml` or `--package name` in workspaces
+- use `cargo behave --tag slow` to run only tagged tests, `--exclude-tag flaky` to exclude
+- use `cargo behave --focus` to run only focused tests
+- use `cargo behave --fail-on-focus` to reject focused tests in CI
+- use `cargo behave --watch` to re-run on file changes
+- use `skip_when!(condition, "reason")` to conditionally skip tests at runtime
 
 Current limitations:
 
 - one `setup` block per group, one `teardown` block per group
-- DSL order within a group: `tokio;` → `setup {}` → `teardown {}` → children
+- DSL order within a group: `tokio;` → `timeout` → `setup {}` → `teardown {}` → children
 - `pending` blocks must be empty
-- `focus` is a marker shown in generated names and CLI output; it does not automatically skip non-focused tests
 - async teardown is error-safe but not panic-safe (no `catch_unwind` across `.await` points)
 
 ## Why Rely On It
@@ -343,7 +372,8 @@ Add `.behave/` to `.gitignore`.
 ## Documentation
 
 - [User Guide](docs/USER_GUIDE.md)
-- [Matcher Reference](docs/MATCHERS.md)
+- [Macro Reference](docs/macros/) — [`behave!`](docs/macros/behave.md) | [`expect!`](docs/macros/expect.md) | [`expect_panic!`](docs/macros/expect_panic.md) | [`expect_no_panic!`](docs/macros/expect_no_panic.md) | [`skip_when!`](docs/macros/skip_when.md)
+- [Matcher Reference](docs/matchers/README.md)
 - [CLI Guide](docs/CLI.md)
 - [Reliability](docs/RELIABILITY.md)
 - [Architecture](docs/ARCHITECTURE.md)

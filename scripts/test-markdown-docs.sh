@@ -18,8 +18,22 @@ for doc in \
   README.md \
   docs/USER_GUIDE.md \
   docs/MATCHERS.md \
+  docs/matchers/README.md \
   docs/CLI.md \
   docs/RELIABILITY.md; do
+  echo "Testing markdown doc: ${doc}"
+  rustdoc \
+    --edition=2021 \
+    --test "${doc}" \
+    -L dependency="${DOC_TARGET_DIR}/debug/deps" \
+    --extern "behave=${LIB_BEHAVE}"
+done
+
+for doc in docs/matchers/*.md; do
+  if [ "${doc}" = "docs/matchers/README.md" ]; then
+    continue
+  fi
+
   echo "Testing markdown doc: ${doc}"
   rustdoc \
     --edition=2021 \

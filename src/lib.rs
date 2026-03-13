@@ -127,9 +127,13 @@
 //! - **`teardown { ... }`** — cleanup code that runs after each test
 //! - **`each [...] |args| { ... }`** — parameterized test generation
 //! - **`pending "name" { ... }`** — mark tests as ignored
-//! - **`focus "name" { ... }`** — mark tests with a __FOCUS__ prefix in generated names
+//! - **`focus "name" { ... }`** — mark tests with a `__FOCUS__` prefix in generated names
+//! - **`tag "name1", "name2"`** — attach metadata tags for CLI filtering
+//! - **`xfail "name" { ... }`** — mark a test as expected-to-fail
+//! - **`matrix [...] x [...] |a, b| { ... }`** — Cartesian product test generation
 //! - **`tokio;`** — generate async tests *(requires `tokio` feature)*
 //! - **`timeout <ms>;`** — fail tests that exceed a deadline (inherits through nesting)
+//! - **`skip_when!(condition, "reason")`** — skip a test conditionally at runtime
 //!
 //! ## Feature Flags
 //!
@@ -261,6 +265,39 @@ macro_rules! expect_no_panic {
     }};
 }
 
+/// Conditionally skips a test at runtime with a reason.
+///
+/// When the condition is `true`, prints a sentinel line and returns early.
+/// The `cargo-behave` CLI detects the sentinel and reclassifies the test
+/// as `Skipped`.
+///
+/// # Examples
+///
+/// ```
+/// use behave::prelude::*;
+///
+/// fn demo() -> Result<(), behave::MatchError> {
+///     skip_when!(cfg!(windows), "only runs on unix");
+///     expect!(1 + 1).to_equal(2)?;
+///     Ok(())
+/// }
+///
+/// assert!(demo().is_ok());
+/// ```
+#[cfg(feature = "std")]
+#[macro_export]
+macro_rules! skip_when {
+    ($cond:expr, $reason:expr) => {
+        if $cond {
+            #[allow(clippy::print_stdout)]
+            {
+                println!("BEHAVE_SKIP: {}", $reason);
+            }
+            return Ok(());
+        }
+    };
+}
+
 /// Prelude module that re-exports everything needed for writing tests.
 ///
 /// # Examples
@@ -281,5 +318,5 @@ pub mod prelude {
     pub use crate::soft::{SoftErrors, SoftMatchError};
 
     #[cfg(feature = "std")]
-    pub use crate::{expect_no_panic, expect_panic};
+    pub use crate::{expect_no_panic, expect_panic, skip_when};
 }

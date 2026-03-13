@@ -30,6 +30,8 @@ pub struct TreeNode {
     pub focused: bool,
     /// Whether this test was pending.
     pub pending: bool,
+    /// Tags applied to this node.
+    pub tags: Vec<String>,
 }
 
 impl TreeNode {
@@ -53,6 +55,7 @@ impl TreeNode {
             outcome: None,
             focused: false,
             pending: false,
+            tags: Vec::new(),
         }
     }
 
@@ -76,6 +79,7 @@ impl TreeNode {
             outcome: None,
             focused: false,
             pending: false,
+            tags: Vec::new(),
         }
     }
 }
@@ -119,21 +123,25 @@ fn insert_into_tree(nodes: &mut Vec<TreeNode>, segments: &[&str], outcome: &Test
 
     let name = segments[0];
     let rest = &segments[1..];
-    let (clean_name, focused, pending) = detect_markers(name);
+    let (clean_name, focused, pending, tags) = detect_markers(name);
 
     let existing = nodes.iter_mut().find(|n| n.name == clean_name);
 
     let node = if let Some(node) = existing {
         node.focused |= focused;
         node.pending |= pending;
+        merge_tags(&mut node.tags, &tags);
         node
     } else if rest.is_empty() {
         let mut leaf = create_leaf_node(clean_name, focused, pending);
+        leaf.tags = tags;
         leaf.outcome = Some(outcome.clone());
         nodes.push(leaf);
         return;
     } else {
-        nodes.push(create_group_node(clean_name, focused, pending));
+        let mut group = create_group_node(clean_name, focused, pending);
+        group.tags = tags;
+        nodes.push(group);
         // Safe: we just pushed
         let len = nodes.len();
         &mut nodes[len - 1]
@@ -143,6 +151,14 @@ fn insert_into_tree(nodes: &mut Vec<TreeNode>, segments: &[&str], outcome: &Test
         node.outcome = Some(outcome.clone());
     } else {
         insert_into_tree(&mut node.children, rest, outcome);
+    }
+}
+
+fn merge_tags(existing: &mut Vec<String>, new_tags: &[String]) {
+    for tag in new_tags {
+        if !existing.contains(tag) {
+            existing.push(tag.clone());
+        }
     }
 }
 
@@ -160,10 +176,11 @@ const fn create_leaf_node(name: String, focused: bool, pending: bool) -> TreeNod
     node
 }
 
-fn detect_markers(name: &str) -> (String, bool, bool) {
+fn detect_markers(name: &str) -> (String, bool, bool, Vec<String>) {
     let mut clean = name.to_string();
     let mut focused = false;
     let mut pending = false;
+    let mut tags = Vec::new();
 
     if let Some(rest) = clean.strip_prefix("__FOCUS__") {
         focused = true;
@@ -174,7 +191,18 @@ fn detect_markers(name: &str) -> (String, bool, bool) {
         clean = rest.to_string();
     }
 
-    (clean, focused, pending)
+    // Strip `__TAG_xxx__` prefixes in a loop
+    while let Some(rest) = clean.strip_prefix("__TAG_") {
+        if let Some(end_pos) = rest.find("__") {
+            let tag = rest[..end_pos].to_string();
+            tags.push(tag);
+            clean = rest[end_pos + 2..].to_string();
+        } else {
+            break;
+        }
+    }
+
+    (clean, focused, pending, tags)
 }
 
 fn sort_nodes(nodes: &mut [TreeNode]) {
@@ -202,18 +230,36 @@ mod tests {
 
     #[test]
     fn detects_focus_marker() {
-        let (name, focused, pending) = detect_markers("__FOCUS__my_test");
+        let (name, focused, pending, tags) = detect_markers("__FOCUS__my_test");
         assert_eq!(name, "my_test");
         assert!(focused);
         assert!(!pending);
+        assert!(tags.is_empty());
     }
 
     #[test]
     fn detects_pending_marker() {
-        let (name, focused, pending) = detect_markers("__PENDING__my_test");
+        let (name, focused, pending, tags) = detect_markers("__PENDING__my_test");
         assert_eq!(name, "my_test");
         assert!(!focused);
         assert!(pending);
+        assert!(tags.is_empty());
+    }
+
+    #[test]
+    fn detects_tag_markers() {
+        let (name, focused, _, tags) = detect_markers("__TAG_slow____TAG_integration__my_test");
+        assert_eq!(name, "my_test");
+        assert!(!focused);
+        assert_eq!(tags, vec!["slow", "integration"]);
+    }
+
+    #[test]
+    fn detects_focus_and_tags() {
+        let (name, focused, _, tags) = detect_markers("__FOCUS____TAG_slow__my_test");
+        assert_eq!(name, "my_test");
+        assert!(focused);
+        assert_eq!(tags, vec!["slow"]);
     }
 
     #[test]
@@ -238,5 +284,60 @@ mod tests {
 
         assert_eq!(tree[0].name, "checkout");
         assert!(tree[0].focused);
+    }
+
+    #[test]
+    fn detects_no_markers() {
+        let (name, focused, pending, tags) = detect_markers("plain_test");
+        assert_eq!(name, "plain_test");
+        assert!(!focused);
+        assert!(!pending);
+        assert!(tags.is_empty());
+    }
+
+    #[test]
+    fn detects_pending_with_tags() {
+        let (name, _, pending, tags) = detect_markers("__PENDING____TAG_slow__my_test");
+        assert_eq!(name, "my_test");
+        assert!(pending);
+        assert_eq!(tags, vec!["slow"]);
+    }
+
+    #[test]
+    fn detects_single_tag() {
+        let (name, _, _, tags) = detect_markers("__TAG_unit__helper_test");
+        assert_eq!(name, "helper_test");
+        assert_eq!(tags, vec!["unit"]);
+    }
+
+    #[test]
+    fn tags_propagate_to_groups_in_tree() {
+        let results = vec![TestResult::new(
+            "__TAG_slow__suite::test_a".to_string(),
+            TestOutcome::Pass,
+        )];
+        let tree = build_tree(&results);
+        assert_eq!(tree[0].name, "suite");
+        assert!(tree[0].tags.contains(&"slow".to_string()));
+    }
+
+    #[test]
+    fn multiple_tests_merge_tags_on_parent() {
+        let results = vec![
+            TestResult::new("__TAG_slow__suite::test_a".to_string(), TestOutcome::Pass),
+            TestResult::new("__TAG_fast__suite::test_b".to_string(), TestOutcome::Pass),
+        ];
+        let tree = build_tree(&results);
+        assert_eq!(tree[0].name, "suite");
+        assert!(tree[0].tags.contains(&"slow".to_string()));
+        assert!(tree[0].tags.contains(&"fast".to_string()));
+    }
+
+    #[test]
+    fn tag_with_underscore_in_name() {
+        let (name, _, _, tags) = detect_markers("__TAG_my_tag__test_fn");
+        // Only strips up to first __ after TAG_, so "my_tag" is the tag
+        assert_eq!(tags, vec!["my_tag"]);
+        assert_eq!(name, "test_fn");
     }
 }

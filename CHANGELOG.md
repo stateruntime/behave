@@ -9,6 +9,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-03-13
+
+### Added
+
+- **Tag-based test metadata** — `tag "name1", "name2"` keyword on groups, tests, `each`, and `matrix` blocks
+  - Tags encode as `__TAG_xxx__` prefixes in generated module/function names
+  - Tag inheritance is automatic through module path (no explicit propagation needed)
+  - `cargo-behave --tag slow` runs only tests with the `slow` tag (union matching)
+  - `cargo-behave --exclude-tag flaky` excludes tests with the `flaky` tag
+  - Both flags can be combined; exclude is applied first, then include
+  - Tags displayed as `[slow, integration]` in tree output
+  - JUnit and JSON output strips tag prefixes from displayed names
+- **Focus-only mode** — `cargo-behave --focus` runs only focused tests
+  - Lists all tests via `cargo test -- --list`, filters for `__FOCUS__` marker
+  - If no tests are focused, runs all tests
+- **CI focus guard** — `cargo-behave --fail-on-focus` exits non-zero if any focused tests exist
+  - Prints focused test names to stderr before failing
+  - Mutually exclusive with `--focus`
+- **Runtime conditional skip** — `skip_when!(condition, "reason")` macro
+  - Prints `BEHAVE_SKIP: reason` sentinel and returns early when condition is true
+  - `cargo-behave` detects sentinel in `--show-output` and reclassifies `Pass` → `Skipped`
+  - `Skipped` outcome with `⊘` symbol in Cyan in tree output
+  - JUnit maps `Skipped` to `<skipped message="skipped: reason" />`
+  - Summary line shows skipped count
+- **Watch mode** — `cargo-behave --watch` re-runs tests on file changes
+  - Watches `src/` and `tests/` recursively for `.rs` file changes
+  - Debounces rapid changes (200ms)
+  - Clears terminal between runs
+  - Compatible with `--tag`, `--exclude-tag`, `--focus`, `--output`
+  - Incompatible with `--fail-on-focus`
+
 ## [0.6.2] - 2026-03-12
 
 ### Fixed
@@ -17,9 +48,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.6.1] - 2026-03-12
 
-### Fixed
+### Added
 
-- Prevent markdown doc-test flakiness in CI by building and linking docs from an isolated target directory
+- **Test matrix (Cartesian product)** — `matrix [a, b] x [c, d] |p1, p2| { body }` generates tests for all combinations
+  - Supports 2+ dimensions separated by `x`
+  - Generates `case_I_J` (or `case_I_J_K`, etc.) function names from dimension indices
+  - Inherits setup, teardown, tokio, timeout, and focus from parent context
+  - Compatible with `xfail` for expected-failure matrix tests
+- **Named test cases in `each`** — optional string label as first tuple element becomes the test function name
+  - `each [("ok", 200, true), ("not_found", 404, false)] |name, code, ok| { ... }` generates `ok` and `not_found` instead of `case_0` and `case_1`
+  - Labels are slugified to valid Rust identifiers; Rust keywords use raw identifiers (`r#type`)
+  - Falls back to `case_N` when no label is provided
+- **`xfail` keyword** — mark a test as expected-to-fail
+  - Test passes when the body returns `Err`; fails loudly if the body unexpectedly passes
+  - Works on individual tests, `each` blocks, and `matrix` blocks
+  - Catches `Result::Err` (from `expect!` / `?`); panics still propagate as real failures
+  - Cannot be combined with `pending` (compile error)
+  - Cannot be applied to groups (compile error)
 
 ## [0.6.0] - 2026-03-12
 
@@ -153,6 +198,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `cargo-behave` now forces parseable libtest `pretty` output for report generation and reserves the libtest `--format` flag
 - JUnit output now strips internal `__FOCUS__` / `__PENDING__` prefixes from displayed test names
 
-[Unreleased]: https://github.com/stateruntime/behave/compare/v0.6.2...HEAD
+[Unreleased]: https://github.com/stateruntime/behave/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/stateruntime/behave/compare/v0.6.2...v0.7.0
 [0.6.2]: https://github.com/stateruntime/behave/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/stateruntime/behave/compare/v0.6.0...v0.6.1

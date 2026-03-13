@@ -64,15 +64,16 @@ src/
     regex.rs                     # [feature = "regex"] to_match_regex, to_contain_regex
   cli/                           # Behind "cli" feature flag
     mod.rs
-    runner.rs                    # Spawns cargo test
-    parser.rs                    # Parses test output
-    tree.rs                      # Builds tree hierarchy
-    render.rs                    # Colored tree output
+    runner.rs                    # Spawns cargo test, list_tests, find_focused_tests
+    parser.rs                    # Parses test output, skip_when! reclassification
+    tree.rs                      # Builds tree hierarchy with tag detection
+    render.rs                    # Colored tree output with tag display
     output.rs                    # Report, Summary, JSON/JUnit rendering
     error.rs                     # CliError type
     config.rs                    # BehaveConfig - behave.toml parsing
     context.rs                   # Project context resolution
     history.rs                   # TestHistory - flaky test detection
+    watch.rs                     # File-watching loop for --watch mode
   bin/
     cargo-behave.rs              # CLI entry point (requires "cli" feature)
 tests/

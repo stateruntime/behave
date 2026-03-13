@@ -24,6 +24,8 @@ pub enum TestOutcome {
     Fail,
     /// Test was ignored.
     Ignored,
+    /// Test was skipped at runtime via `skip_when!`.
+    Skipped,
 }
 
 /// A single parsed test result.
@@ -46,6 +48,8 @@ pub struct TestResult {
     pub full_name: String,
     /// The outcome of the test.
     pub outcome: TestOutcome,
+    /// The skip reason, if the test was skipped via `skip_when!`.
+    pub skip_reason: Option<String>,
 }
 
 impl TestResult {
@@ -63,7 +67,11 @@ impl TestResult {
     /// # }
     /// ```
     pub const fn new(full_name: String, outcome: TestOutcome) -> Self {
-        Self { full_name, outcome }
+        Self {
+            full_name,
+            outcome,
+            skip_reason: None,
+        }
     }
 }
 
@@ -98,6 +106,58 @@ fn parse_test_line(line: &str) -> Option<TestResult> {
     let (full_name, outcome) = parse_name_and_outcome(rest)?;
 
     Some(TestResult::new(full_name, outcome))
+}
+
+/// Scans `--show-output` stdout for `BEHAVE_SKIP` sentinels and
+/// reclassifies matching `Pass` results as `Skipped`.
+///
+/// # Examples
+///
+/// ```
+/// # #[cfg(feature = "cli")]
+/// # {
+/// use behave::cli::parser::{TestResult, TestOutcome, reclassify_skipped};
+///
+/// let mut results = vec![TestResult::new("my::test".to_string(), TestOutcome::Pass)];
+/// let stdout = "---- my::test stdout ----\nBEHAVE_SKIP: not on CI\n";
+/// reclassify_skipped(&mut results, stdout);
+/// assert!(matches!(results[0].outcome, TestOutcome::Skipped));
+/// # }
+/// ```
+pub fn reclassify_skipped(results: &mut [TestResult], stdout: &str) {
+    let sentinels = extract_skip_sentinels(stdout);
+    for result in results {
+        if result.outcome != TestOutcome::Pass {
+            continue;
+        }
+        if let Some(reason) = sentinels.get(result.full_name.as_str()) {
+            result.outcome = TestOutcome::Skipped;
+            result.skip_reason = Some((*reason).to_string());
+        }
+    }
+}
+
+/// Extracts `(test_name, reason)` pairs from `--show-output` stdout blocks.
+///
+/// Looks for `---- <name> stdout ----` headers followed by `BEHAVE_SKIP: <reason>` lines.
+fn extract_skip_sentinels(stdout: &str) -> std::collections::HashMap<&str, &str> {
+    let mut sentinels = std::collections::HashMap::new();
+    let mut current_test: Option<&str> = None;
+
+    for line in stdout.lines() {
+        if let Some(name) = line
+            .strip_prefix("---- ")
+            .and_then(|rest| rest.strip_suffix(" stdout ----"))
+        {
+            current_test = Some(name);
+        } else if let Some(reason) = line.strip_prefix("BEHAVE_SKIP: ") {
+            if let Some(name) = current_test {
+                sentinels.insert(name, reason);
+            }
+        }
+    }
+
+    sentinels
 }
 
 fn parse_name_and_outcome(rest: &str) -> Option<(String, TestOutcome)> {
@@ -144,5 +204,94 @@ mod tests {
         let output = "running 1 test\ntest foo ... ok\ntest result: ok.\n";
         let results = parse_test_output(output);
         assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn reclassify_with_sentinel() {
+        let mut results = vec![TestResult::new("my::test".to_string(), TestOutcome::Pass)];
+        let stdout = "---- my::test stdout ----\nBEHAVE_SKIP: not on CI\n";
+        reclassify_skipped(&mut results, stdout);
+        assert_eq!(results[0].outcome, TestOutcome::Skipped);
+        assert_eq!(results[0].skip_reason.as_deref(), Some("not on CI"));
+    }
+
+    #[test]
+    fn reclassify_without_sentinel_no_change() {
+        let mut results = vec![TestResult::new("my::test".to_string(), TestOutcome::Pass)];
+        let stdout = "---- my::test stdout ----\nsome other output\n";
+        reclassify_skipped(&mut results, stdout);
+        assert_eq!(results[0].outcome, TestOutcome::Pass);
+        assert!(results[0].skip_reason.is_none());
+    }
+
+    #[test]
+    fn reclassify_does_not_touch_failures() {
+        let mut results = vec![TestResult::new("my::test".to_string(), TestOutcome::Fail)];
+        let stdout = "---- my::test stdout ----\nBEHAVE_SKIP: reason\n";
+        reclassify_skipped(&mut results, stdout);
+        assert_eq!(results[0].outcome, TestOutcome::Fail);
+    }
+
+    #[test]
+    fn reclassify_captures_reason() {
+        let mut results = vec![TestResult::new("a::b".to_string(), TestOutcome::Pass)];
+        let stdout = "---- a::b stdout ----\nBEHAVE_SKIP: requires feature X\n";
+        reclassify_skipped(&mut results, stdout);
+        assert_eq!(
+            results[0].skip_reason.as_deref(),
+            Some("requires feature X")
+        );
+    }
+
+    #[test]
+    fn reclassify_handles_multiple_sentinels() {
+        let mut results = vec![
+            TestResult::new("test::a".to_string(), TestOutcome::Pass),
+            TestResult::new("test::b".to_string(), TestOutcome::Pass),
+        ];
+        let stdout = "---- test::a stdout ----\nBEHAVE_SKIP: reason a\n\
+                       ---- test::b stdout ----\nBEHAVE_SKIP: reason b\n";
+        reclassify_skipped(&mut results, stdout);
+        assert_eq!(results[0].outcome, TestOutcome::Skipped);
+        assert_eq!(results[0].skip_reason.as_deref(), Some("reason a"));
+        assert_eq!(results[1].outcome, TestOutcome::Skipped);
+        assert_eq!(results[1].skip_reason.as_deref(), Some("reason b"));
+    }
+
+    #[test]
+    fn reclassify_ignores_malformed_sentinel() {
+        let mut results = vec![TestResult::new("my::test".to_string(), TestOutcome::Pass)];
+        let stdout = "---- my::test stdout ----\nBEHAVE_SKIP missing colon\n";
+        reclassify_skipped(&mut results, stdout);
+        assert_eq!(results[0].outcome, TestOutcome::Pass);
+    }
+
+    #[test]
+    fn reclassify_empty_stdout_is_noop() {
+        let mut results = vec![TestResult::new("my::test".to_string(), TestOutcome::Pass)];
+        reclassify_skipped(&mut results, "");
+        assert_eq!(results[0].outcome, TestOutcome::Pass);
+    }
+
+    #[test]
+    fn reclassify_does_not_touch_ignored() {
+        let mut results = vec![TestResult::new(
+            "my::test".to_string(),
+            TestOutcome::Ignored,
+        )];
+        let stdout = "---- my::test stdout ----\nBEHAVE_SKIP: reason\n";
+        reclassify_skipped(&mut results, stdout);
+        assert_eq!(results[0].outcome, TestOutcome::Ignored);
+    }
+
+    #[test]
+    fn reclassify_reason_with_special_chars() {
+        let mut results = vec![TestResult::new("my::test".to_string(), TestOutcome::Pass)];
+        let stdout = "---- my::test stdout ----\nBEHAVE_SKIP: requires env $CI_TOKEN & API key\n";
+        reclassify_skipped(&mut results, stdout);
+        assert_eq!(
+            results[0].skip_reason.as_deref(),
+            Some("requires env $CI_TOKEN & API key")
+        );
     }
 }

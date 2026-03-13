@@ -167,7 +167,8 @@ options, results, collections, strings, floats, panic behavior, and custom
 domain-specific rules.
 
 If you want the full explanation of what each matcher checks, why you would use
-it, and a working example for every method, read [MATCHERS.md](MATCHERS.md).
+it, and a working example for every method, read
+[docs/matchers/](matchers/README.md).
 
 ### Negation
 
@@ -197,8 +198,9 @@ behave! {
 }
 ```
 
-Use `focus` to mark important scenarios in the generated test tree and CLI
-output.
+Use `focus` to mark important scenarios. With `cargo behave --focus`, only
+focused tests run. With `cargo behave --fail-on-focus`, the CLI exits non-zero
+if any focused tests exist (useful for CI).
 
 ```rust
 use behave::prelude::*;
@@ -211,6 +213,78 @@ behave! {
     }
 }
 ```
+
+### Tags
+
+Use `tag` to attach metadata labels to groups, tests, `each`, or `matrix`
+blocks. Tags are inherited automatically through module nesting.
+
+```rust
+use behave::prelude::*;
+
+behave! {
+    "database" tag "slow", "integration" {
+        "creates a user" {
+            expect!(true).to_be_true()?;
+        }
+    }
+
+    "parser" tag "unit" {
+        "tokenizes input" {
+            expect!(true).to_be_true()?;
+        }
+    }
+}
+```
+
+Filter tests by tag with the CLI:
+
+```bash
+cargo behave --tag slow               # run only tests tagged "slow"
+cargo behave --exclude-tag flaky       # exclude tests tagged "flaky"
+cargo behave --tag unit --exclude-tag slow  # combine both
+```
+
+Tags display as `[slow, integration]` in tree output and are stripped from
+JUnit/JSON names.
+
+### Runtime Conditional Skip
+
+Use `skip_when!` to skip a test at runtime based on a condition:
+
+```rust,ignore
+use behave::prelude::*;
+
+behave! {
+    "optional integration tests" {
+        "requires redis" {
+            skip_when!(std::env::var("REDIS_URL").is_err(), "REDIS_URL not set");
+            expect!(true).to_be_true()?;
+        }
+    }
+}
+```
+
+When the condition is true, the test returns early with a skip sentinel.
+`cargo-behave` detects this and reports the test as `Skipped` (with the `⊘`
+symbol). Without the CLI, the test passes silently.
+
+### Expected Failures
+
+Use `xfail` to mark a test that is expected to fail:
+
+```rust,ignore
+use behave::prelude::*;
+
+behave! {
+    xfail "known broken behavior" {
+        expect!(1).to_equal(2)?;
+    }
+}
+```
+
+The test passes when the body returns an error, and fails loudly if it
+unexpectedly passes. Works on individual tests, `each`, and `matrix` blocks.
 
 ### Teardown
 
@@ -411,13 +485,21 @@ Supported today:
 
 - nested groups and nested `setup` inheritance
 - `each` blocks for parameterized/table-driven test generation
+- `matrix` blocks for Cartesian product test generation
+- `xfail` for expected-failure tests
+- `tag` metadata for grouping and CLI filtering
+- `skip_when!` for runtime conditional skipping
 - `teardown` blocks with panic-safe cleanup (sync) or error-safe cleanup (async)
 - `tokio;` group declaration for `#[tokio::test]` generation (behind `tokio` feature)
+- `timeout` keyword for deadline enforcement (inherits through nesting)
 - `expect_panic!` and `expect_no_panic!` macros for panic assertions (behind `std` feature)
+- soft assertions with `SoftErrors` for collecting multiple failures
 - shadowing setup variables with later `let` bindings
 - `pending` tests
-- `focus` markers in generated names and CLI output
+- `focus` markers with `--focus` (run only focused) and `--fail-on-focus` (CI guard)
 - custom matchers
+- `cargo behave --tag slow` / `--exclude-tag flaky` for tag filtering
+- `cargo behave --watch` for re-running on file changes
 - `cargo behave checkout` style test-name filtering
 - `cargo behave checkout -- --nocapture` style libtest flag forwarding
 - `cargo behave --output json` and `cargo behave --output junit`
@@ -427,9 +509,8 @@ Current limitations:
 
 - only one `setup` block is allowed per group
 - only one `teardown` block is allowed per group
-- the DSL order within a group is: `tokio;` → `setup {}` → `teardown {}` → children
+- the DSL order within a group is: `tokio;` → `timeout` → `setup {}` → `teardown {}` → children
 - `pending` blocks must be empty
-- `focus` does not enforce focus-only execution
 - async teardown is error-safe (runs after `?` failures) but not panic-safe (no `catch_unwind` across `.await` points)
 - libtest `--format` is reserved by `cargo-behave`
 - flaky detection hashes selected package inputs, but it is not a full semantic dependency graph
@@ -441,7 +522,7 @@ Current limitations:
 - [`examples/setup_inheritance.rs`](../examples/setup_inheritance.rs) for deeply nested setup
 - [`examples/teardown.rs`](../examples/teardown.rs) for panic-safe cleanup patterns
 - [`examples/custom_matcher.rs`](../examples/custom_matcher.rs) for reusable matchers
-- [`MATCHERS.md`](MATCHERS.md) for every matcher and its intended use
+- [`docs/matchers/`](matchers/README.md) for every matcher and its intended use
 - [`RELIABILITY.md`](RELIABILITY.md) for trust, support, and limitation signals
 - [`tests/smoke.rs`](../tests/smoke.rs) for broad matcher and DSL coverage
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) for internals

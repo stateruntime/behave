@@ -959,6 +959,59 @@ mod async_timeout_tests {
     }
 }
 
+mod tag_tests {
+    use behave::prelude::*;
+
+    behave! {
+        "tagged suite" tag "integration" {
+            "test inside tagged group" {
+                expect!(true).to_be_true()?;
+            }
+        }
+
+        "tagged test" tag "slow", "nightly" {
+            expect!(1 + 1).to_equal(2)?;
+        }
+
+        "tagged each" tag "unit" {
+            each [1, 2] |n| {
+                expect!(n).to_be_greater_than(0)?;
+            }
+        }
+
+        "tagged matrix" tag "slow" {
+            matrix [1, 2] x [10, 20] |a, b| {
+                expect!(a + b).to_be_greater_than(0)?;
+            }
+        }
+
+        "focus with tag" {
+            focus "focused and tagged" tag "critical" {
+                expect!(42).to_equal(42)?;
+            }
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+mod skip_when_tests {
+    use behave::prelude::*;
+
+    behave! {
+        "skip when" {
+            "skips when condition is true" {
+                skip_when!(true, "always skip");
+                expect!(false).to_be_true()?;
+            }
+
+            "continues when condition is false" {
+                skip_when!(false, "never skip");
+                expect!(true).to_be_true()?;
+            }
+        }
+    }
+}
+
 mod common;
 
 /// Demonstrates importing shared helpers from `tests/common/mod.rs`.

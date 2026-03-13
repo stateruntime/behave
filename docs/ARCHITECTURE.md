@@ -49,10 +49,11 @@ src/
     error.rs          # CliError - CLI error types
     history.rs        # TestHistory - flaky test detection via history tracking
     output.rs         # JSON and JUnit report rendering
-    parser.rs         # TestResult - cargo test output parser
-    render.rs         # Tree rendering with colors
-    runner.rs         # Spawns cargo test
-    tree.rs           # TreeNode - builds tree from flat test names
+    parser.rs         # TestResult - cargo test output parser, skip_when! reclassification
+    render.rs         # Tree rendering with colors and tag display
+    runner.rs         # Spawns cargo test, list_tests, find_focused_tests
+    tree.rs           # TreeNode - builds tree from flat test names, tag detection
+    watch.rs          # File-watching loop for --watch mode (uses notify crate)
 
 macros/src/
   lib.rs              # #[proc_macro] behave entry point
@@ -68,12 +69,14 @@ User writes:           behave! { "suite" { "test" { expect!(x).to_equal(1)?; } }
                                     |
                         behave-macros parses DSL
                                     |
-                        BehaveInput (AST: Group, Test, Pending, Each nodes)
+                        BehaveInput (AST: Group, Test, Pending, Each, Matrix nodes)
                                     |
-                        codegen generates:
+                        codegen generates (with tag/focus/xfail prefixes):
                                     |
                         mod suite { #[test] fn test() -> Result<...> { ... } }
-                        (each blocks become mod label { fn case_0, fn case_1, ... })
+                        (each → mod label { fn case_0, ... })
+                        (matrix → mod label { fn case_0_0, fn case_0_1, ... })
+                        (tags → __TAG_name__ prefixes on module/function names)
                                     |
                         cargo test runs standard #[test] functions
 ```

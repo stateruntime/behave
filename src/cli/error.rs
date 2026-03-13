@@ -60,6 +60,16 @@ pub enum CliError {
         /// The unsupported argument.
         arg: String,
     },
+    /// Focused tests found in CI guard mode.
+    FocusedTestsFound {
+        /// The number of focused tests.
+        count: usize,
+    },
+    /// Watch mode initialization failed.
+    WatchInit {
+        /// Description of the error.
+        message: String,
+    },
 }
 
 impl fmt::Display for CliError {
@@ -85,6 +95,15 @@ impl fmt::Display for CliError {
             Self::UnsupportedLibtestArg { arg } => {
                 write!(f, "unsupported libtest argument for cargo-behave: {arg}")
             }
+            Self::FocusedTestsFound { count } => {
+                write!(
+                    f,
+                    "{count} focused test(s) found; remove `focus` markers before merging"
+                )
+            }
+            Self::WatchInit { message } => {
+                write!(f, "failed to initialize watch mode: {message}")
+            }
         }
     }
 }
@@ -99,7 +118,9 @@ impl std::error::Error for CliError {
             | Self::Metadata { .. }
             | Self::ConfigParse { .. }
             | Self::PackageSelection { .. }
-            | Self::UnsupportedLibtestArg { .. } => None,
+            | Self::UnsupportedLibtestArg { .. }
+            | Self::FocusedTestsFound { .. }
+            | Self::WatchInit { .. } => None,
         }
     }
 }
@@ -251,5 +272,29 @@ mod tests {
             arg: "--format".to_string(),
         };
         assert!(std::error::Error::source(&err).is_none());
+    }
+
+    #[test]
+    fn display_focused_tests_found() {
+        let err = CliError::FocusedTestsFound { count: 3 };
+        let msg = err.to_string();
+        assert!(msg.contains("3 focused test(s) found"));
+        assert!(msg.contains("remove `focus` markers"));
+    }
+
+    #[test]
+    fn source_focused_tests_found_is_none() {
+        let err = CliError::FocusedTestsFound { count: 1 };
+        assert!(std::error::Error::source(&err).is_none());
+    }
+
+    #[test]
+    fn display_watch_init() {
+        let err = CliError::WatchInit {
+            message: "no directory".to_string(),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("failed to initialize watch mode"));
+        assert!(msg.contains("no directory"));
     }
 }

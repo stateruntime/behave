@@ -21,6 +21,24 @@ fn make_ident(name: &str) -> Ident {
     }
 }
 
+/// Builds a prefixed name from a slug, focus flag, and tag list.
+///
+/// Prefix order: `__FOCUS__` → `__TAG_xxx__` (per tag, slugified) → slug.
+fn build_prefixed_name(slug: &str, focused: bool, tags: &[String]) -> Ident {
+    let mut prefixed = String::new();
+    if focused {
+        prefixed.push_str("__FOCUS__");
+    }
+    for tag in tags {
+        let tag_slug = slugify(tag);
+        prefixed.push_str("__TAG_");
+        prefixed.push_str(&tag_slug);
+        prefixed.push_str("__");
+    }
+    prefixed.push_str(slug);
+    format_ident!("{prefixed}")
+}
+
 /// Context threaded through code generation for inherited state.
 struct GenContext<'a> {
     setups: Vec<&'a TokenStream>,
@@ -60,8 +78,8 @@ fn generate_node(node: &BehaveNode, ctx: &GenContext<'_>) -> syn::Result<TokenSt
 
 fn generate_group(group: &GroupNode, ctx: &GenContext<'_>) -> syn::Result<TokenStream> {
     let slug = slugify(&group.label);
-    let mod_name = if group.focused {
-        format_ident!("__FOCUS__{slug}")
+    let mod_name = if group.focused || !group.tags.is_empty() {
+        build_prefixed_name(&slug, group.focused, &group.tags)
     } else {
         make_ident(&slug)
     };
@@ -93,8 +111,8 @@ fn generate_group(group: &GroupNode, ctx: &GenContext<'_>) -> syn::Result<TokenS
 }
 
 fn generate_test(test: &TestNode, ctx: &GenContext<'_>) -> TokenStream {
-    let fn_name = if test.focused {
-        format_ident!("__FOCUS__{}", slugify(&test.label))
+    let fn_name = if test.focused || !test.tags.is_empty() {
+        build_prefixed_name(&slugify(&test.label), test.focused, &test.tags)
     } else {
         make_ident(&slugify(&test.label))
     };
@@ -424,8 +442,8 @@ fn gen_async_teardown_timeout(
 
 fn generate_each(each: &EachNode, ctx: &GenContext<'_>) -> TokenStream {
     let slug = slugify(&each.label);
-    let mod_name = if each.focused {
-        format_ident!("__FOCUS__{slug}")
+    let mod_name = if each.focused || !each.tags.is_empty() {
+        build_prefixed_name(&slug, each.focused, &each.tags)
     } else {
         make_ident(&slug)
     };
@@ -461,8 +479,8 @@ fn generate_each(each: &EachNode, ctx: &GenContext<'_>) -> TokenStream {
 
 fn generate_matrix(matrix: &MatrixNode, ctx: &GenContext<'_>) -> TokenStream {
     let slug = slugify(&matrix.label);
-    let mod_name = if matrix.focused {
-        format_ident!("__FOCUS__{slug}")
+    let mod_name = if matrix.focused || !matrix.tags.is_empty() {
+        build_prefixed_name(&slug, matrix.focused, &matrix.tags)
     } else {
         make_ident(&slug)
     };
@@ -979,6 +997,96 @@ mod tests {
         let code = result.map(|t| t.to_string()).unwrap_or_default();
         assert!(code.contains("base"), "expected setup binding in: {code}");
         assert!(code.contains("fn case_0"), "expected fn case_0 in: {code}");
+    }
+
+    // --- tag codegen tests ---
+
+    #[test]
+    fn generates_tag_prefix_on_test() {
+        let input = quote::quote! {
+            "my test" tag "slow" {
+                let x = 1;
+            }
+        };
+        let result = parse_and_generate(input);
+        assert!(result.is_ok());
+        let code = result.map(|t| t.to_string()).unwrap_or_default();
+        assert!(
+            code.contains("__TAG_slow__"),
+            "expected __TAG_slow__ in: {code}"
+        );
+    }
+
+    #[test]
+    fn generates_multiple_tag_prefixes() {
+        let input = quote::quote! {
+            "my test" tag "slow", "integration" {
+                let x = 1;
+            }
+        };
+        let result = parse_and_generate(input);
+        assert!(result.is_ok());
+        let code = result.map(|t| t.to_string()).unwrap_or_default();
+        assert!(
+            code.contains("__TAG_slow__"),
+            "expected __TAG_slow__ in: {code}"
+        );
+        assert!(
+            code.contains("__TAG_integration__"),
+            "expected __TAG_integration__ in: {code}"
+        );
+    }
+
+    #[test]
+    fn generates_focus_and_tag_combo() {
+        let input = quote::quote! {
+            focus "important" tag "critical" {
+                let x = 1;
+            }
+        };
+        let result = parse_and_generate(input);
+        assert!(result.is_ok());
+        let code = result.map(|t| t.to_string()).unwrap_or_default();
+        assert!(
+            code.contains("__FOCUS____TAG_critical__"),
+            "expected FOCUS then TAG prefix in: {code}"
+        );
+    }
+
+    #[test]
+    fn generates_tag_on_each_module() {
+        let input = quote::quote! {
+            "cases" tag "unit" {
+                each [1, 2] |n| {
+                    let _ = n;
+                }
+            }
+        };
+        let result = parse_and_generate(input);
+        assert!(result.is_ok());
+        let code = result.map(|t| t.to_string()).unwrap_or_default();
+        assert!(
+            code.contains("__TAG_unit__"),
+            "expected __TAG_unit__ in: {code}"
+        );
+    }
+
+    #[test]
+    fn generates_tag_on_matrix_module() {
+        let input = quote::quote! {
+            "combos" tag "slow" {
+                matrix [1, 2] x [3, 4] |a, b| {
+                    let _ = a + b;
+                }
+            }
+        };
+        let result = parse_and_generate(input);
+        assert!(result.is_ok());
+        let code = result.map(|t| t.to_string()).unwrap_or_default();
+        assert!(
+            code.contains("__TAG_slow__"),
+            "expected __TAG_slow__ in: {code}"
+        );
     }
 
     // --- xfail codegen tests ---

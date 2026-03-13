@@ -88,6 +88,7 @@ fn render_name_with_status(
         TestOutcome::Pass => ("✓", Color::Green),
         TestOutcome::Fail => ("✗", Color::Red),
         TestOutcome::Ignored => ("○", Color::Yellow),
+        TestOutcome::Skipped => ("⊘", Color::Cyan),
     };
 
     if use_color {
@@ -115,6 +116,10 @@ fn humanize_with_markers(node: &TreeNode) -> String {
     if node.focused {
         name = format!("[focus] {name}");
     }
+    if !node.tags.is_empty() {
+        let tag_list = node.tags.join(", ");
+        name = format!("{name} [{tag_list}]");
+    }
 
     name
 }
@@ -134,7 +139,7 @@ fn humanize_with_markers(node: &TreeNode) -> String {
 /// use behave::cli::render::render_summary;
 ///
 /// let mut buf = Vec::new();
-/// let summary = Summary::new(5, 1, 2, 8);
+/// let summary = Summary::new(5, 1, 2, 0, 8);
 /// render_summary(&mut buf, &summary, false)?;
 /// # }
 /// # Ok::<(), std::io::Error>(())
@@ -158,6 +163,9 @@ pub fn render_summary(
 
     if summary.failed > 0 {
         write!(writer, ", {} failed", summary.failed)?;
+    }
+    if summary.skipped > 0 {
+        write!(writer, ", {} skipped", summary.skipped)?;
     }
     if summary.ignored > 0 {
         write!(writer, ", {} ignored", summary.ignored)?;
@@ -244,9 +252,23 @@ mod tests {
     }
 
     #[test]
+    fn render_skipped_test_node() {
+        let mut root = TreeNode::new_group("suite".to_string());
+        let mut leaf = TreeNode::new_leaf("skipped_test".to_string());
+        leaf.outcome = Some(TestOutcome::Skipped);
+        root.children.push(leaf);
+
+        let mut buf = Vec::new();
+        render_tree(&mut buf, &[root], false).ok();
+        let output = String::from_utf8(buf).unwrap_or_default();
+        assert!(output.contains("⊘"));
+        assert!(output.contains("skipped test"));
+    }
+
+    #[test]
     fn render_summary_no_color() {
         let mut buf = Vec::new();
-        render_summary(&mut buf, &Summary::new(5, 1, 2, 8), false).ok();
+        render_summary(&mut buf, &Summary::new(5, 1, 2, 0, 8), false).ok();
         let output = String::from_utf8(buf).unwrap_or_default();
         assert!(output.contains("5 passed"));
         assert!(output.contains("1 failed"));
@@ -254,9 +276,18 @@ mod tests {
     }
 
     #[test]
+    fn render_summary_with_skipped() {
+        let mut buf = Vec::new();
+        render_summary(&mut buf, &Summary::new(3, 0, 0, 2, 5), false).ok();
+        let output = String::from_utf8(buf).unwrap_or_default();
+        assert!(output.contains("3 passed"));
+        assert!(output.contains("2 skipped"));
+    }
+
+    #[test]
     fn render_summary_no_failures() {
         let mut buf = Vec::new();
-        render_summary(&mut buf, &Summary::new(3, 0, 0, 3), false).ok();
+        render_summary(&mut buf, &Summary::new(3, 0, 0, 0, 3), false).ok();
         let output = String::from_utf8(buf).unwrap_or_default();
         assert!(output.contains("3 passed"));
         assert!(!output.contains("failed"));
@@ -265,8 +296,76 @@ mod tests {
     #[test]
     fn render_summary_with_color() {
         let mut buf = Vec::new();
-        render_summary(&mut buf, &Summary::new(5, 0, 0, 5), true).ok();
+        render_summary(&mut buf, &Summary::new(5, 0, 0, 0, 5), true).ok();
         let output = String::from_utf8(buf).unwrap_or_default();
         assert!(output.contains("5 passed"));
+    }
+
+    #[test]
+    fn humanize_with_single_tag() {
+        let mut node = TreeNode::new_leaf("my_test".to_string());
+        node.tags = vec!["slow".to_string()];
+        assert_eq!(humanize_with_markers(&node), "my test [slow]");
+    }
+
+    #[test]
+    fn humanize_with_multiple_tags() {
+        let mut node = TreeNode::new_leaf("my_test".to_string());
+        node.tags = vec!["slow".to_string(), "integration".to_string()];
+        assert_eq!(humanize_with_markers(&node), "my test [slow, integration]");
+    }
+
+    #[test]
+    fn humanize_with_focus_and_tags() {
+        let mut node = TreeNode::new_leaf("my_test".to_string());
+        node.focused = true;
+        node.tags = vec!["critical".to_string()];
+        assert_eq!(humanize_with_markers(&node), "[focus] my test [critical]");
+    }
+
+    #[test]
+    fn humanize_with_pending_and_tags() {
+        let mut node = TreeNode::new_leaf("todo_test".to_string());
+        node.pending = true;
+        node.tags = vec!["unit".to_string()];
+        assert_eq!(humanize_with_markers(&node), "[pending] todo test [unit]");
+    }
+
+    #[test]
+    fn render_all_four_outcome_types() {
+        let mut root = TreeNode::new_group("suite".to_string());
+
+        let mut pass = TreeNode::new_leaf("passing".to_string());
+        pass.outcome = Some(TestOutcome::Pass);
+        let mut fail = TreeNode::new_leaf("failing".to_string());
+        fail.outcome = Some(TestOutcome::Fail);
+        let mut ignored = TreeNode::new_leaf("ignored".to_string());
+        ignored.outcome = Some(TestOutcome::Ignored);
+        let mut skipped = TreeNode::new_leaf("skipped".to_string());
+        skipped.outcome = Some(TestOutcome::Skipped);
+
+        root.children.push(pass);
+        root.children.push(fail);
+        root.children.push(ignored);
+        root.children.push(skipped);
+
+        let mut buf = Vec::new();
+        render_tree(&mut buf, &[root], false).ok();
+        let output = String::from_utf8(buf).unwrap_or_default();
+        assert!(output.contains("✓"));
+        assert!(output.contains("✗"));
+        assert!(output.contains("○"));
+        assert!(output.contains("⊘"));
+    }
+
+    #[test]
+    fn render_summary_all_counts() {
+        let mut buf = Vec::new();
+        render_summary(&mut buf, &Summary::new(3, 2, 1, 4, 10), false).ok();
+        let output = String::from_utf8(buf).unwrap_or_default();
+        assert!(output.contains("3 passed"));
+        assert!(output.contains("2 failed"));
+        assert!(output.contains("1 ignored"));
+        assert!(output.contains("4 skipped"));
     }
 }

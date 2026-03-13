@@ -14,10 +14,11 @@ use behave::cli::context::{resolve_project_context, SelectedPackage};
 use behave::cli::error::CliError;
 use behave::cli::history::{hash_source, load_history, save_history, update_and_detect, FlakyTest};
 use behave::cli::output::{render_json, render_junit, Report, Summary};
-use behave::cli::parser::{parse_test_output, TestResult};
+use behave::cli::parser::{parse_test_output, reclassify_skipped, TestResult};
 use behave::cli::render::{render_summary, render_tree};
-use behave::cli::runner::run_cargo_test;
+use behave::cli::runner::{find_focused_tests, list_tests, run_cargo_test};
 use behave::cli::tree::build_tree;
+use behave::cli::watch::watch_loop;
 
 /// Supported output formats for `cargo-behave`.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
@@ -33,6 +34,7 @@ enum OutputFormat {
 /// A BDD test runner for Rust.
 #[derive(Parser, Debug)]
 #[command(name = "cargo-behave", version, about)]
+#[allow(clippy::struct_excessive_bools)]
 struct Args {
     /// Subcommand name (always "behave" when invoked as `cargo behave`).
     #[arg(hide = true, default_value = "behave")]
@@ -46,6 +48,26 @@ struct Args {
     #[arg(long, value_enum, default_value_t = OutputFormat::Tree)]
     output: OutputFormat,
 
+    /// Only run tests with at least one of these tags.
+    #[arg(long = "tag", num_args = 1)]
+    tags: Vec<String>,
+
+    /// Exclude tests with any of these tags.
+    #[arg(long = "exclude-tag", num_args = 1)]
+    exclude_tags: Vec<String>,
+
+    /// Only run focused tests. If no tests are focused, runs all.
+    #[arg(long, conflicts_with = "fail_on_focus")]
+    focus: bool,
+
+    /// Fail if any focused tests are found (CI guard).
+    #[arg(long, conflicts_with = "focus")]
+    fail_on_focus: bool,
+
+    /// Re-run tests on file changes.
+    #[arg(long, conflicts_with = "fail_on_focus")]
+    watch: bool,
+
     /// Extra arguments passed to `cargo test`.
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     extra: Vec<String>,
@@ -53,6 +75,10 @@ struct Args {
 
 fn main() -> ExitCode {
     let args = Args::parse();
+
+    if args.watch {
+        return run_watch(&args);
+    }
 
     match run(&args) {
         Ok(has_failures) => {
@@ -69,11 +95,77 @@ fn main() -> ExitCode {
     }
 }
 
+fn run_watch(args: &Args) -> ExitCode {
+    let cwd = match std::env::current_dir() {
+        Ok(d) => d,
+        Err(err) => {
+            eprintln!("error: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let result = watch_loop(&cwd, || {
+        match run(args) {
+            Ok(_) | Err(_) => {}
+        }
+        Ok(())
+    });
+
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(err) => {
+            eprintln!("error: {err}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 fn run(args: &Args) -> Result<bool, CliError> {
     let cwd = std::env::current_dir().map_err(|source| CliError::Io { source })?;
     let (cargo_args, test_args) = split_extra_args(&args.extra);
+
+    // --fail-on-focus: list tests, check for focused, fail if any
+    if args.fail_on_focus {
+        let test_names = list_tests(&cargo_args)?;
+        let focused = find_focused_tests(&test_names);
+        if !focused.is_empty() {
+            for name in &focused {
+                eprintln!("  focus: {name}");
+            }
+            return Err(CliError::FocusedTestsFound {
+                count: focused.len(),
+            });
+        }
+    }
+
+    // --focus: add filter for focused tests only
+    let cargo_args = if args.focus {
+        let test_names = list_tests(&cargo_args)?;
+        let focused = find_focused_tests(&test_names);
+        if focused.is_empty() {
+            cargo_args
+        } else {
+            let mut new_args = cargo_args;
+            new_args.push("__FOCUS__");
+            new_args
+        }
+    } else {
+        cargo_args
+    };
+
     let cargo_output = run_cargo_test(&cargo_args, &test_args)?;
-    let report = build_report(&cwd, &cargo_args, &cargo_output)?;
+    let mut report = build_report(&cwd, &cargo_args, &cargo_output)?;
+
+    let tag_filtering = !args.tags.is_empty() || !args.exclude_tags.is_empty();
+    if tag_filtering {
+        report.tests = filter_results_by_tags(&report.tests, &args.tags, &args.exclude_tags);
+        report.summary = Summary::from_results(&report.tests);
+        report.tree = build_tree(&report.tests);
+
+        if report.tests.is_empty() && cargo_output.status.success() {
+            eprintln!("no tests matched the specified tags");
+        }
+    }
 
     render_output(args, &report)?;
 
@@ -243,7 +335,40 @@ fn collect_results(stdout: &str, stderr: &str) -> Vec<TestResult> {
     sort_results(&mut results);
     results
         .dedup_by(|left, right| left.full_name == right.full_name && left.outcome == right.outcome);
+    reclassify_skipped(&mut results, stdout);
     results
+}
+
+fn filter_results_by_tags(
+    results: &[TestResult],
+    include_tags: &[String],
+    exclude_tags: &[String],
+) -> Vec<TestResult> {
+    results
+        .iter()
+        .filter(|result| {
+            let name = &result.full_name;
+
+            // Exclude applied first: test excluded if ANY exclude tag found
+            for tag in exclude_tags {
+                let marker = format!("__TAG_{tag}__");
+                if name.contains(&marker) {
+                    return false;
+                }
+            }
+
+            // Include: test matches if ANY include tag found (union)
+            if include_tags.is_empty() {
+                return true;
+            }
+
+            include_tags.iter().any(|tag| {
+                let marker = format!("__TAG_{tag}__");
+                name.contains(&marker)
+            })
+        })
+        .cloned()
+        .collect()
 }
 
 const fn command_failed(command_success: bool, failed_tests: usize) -> bool {
@@ -423,6 +548,64 @@ mod tests {
     }
 
     #[test]
+    fn clap_parses_focus_flag() {
+        let parsed = Args::try_parse_from(["cargo-behave", "behave", "--focus"]);
+        assert!(parsed.is_ok());
+        if let Ok(args) = parsed {
+            assert!(args.focus);
+            assert!(!args.fail_on_focus);
+        }
+    }
+
+    #[test]
+    fn clap_parses_fail_on_focus_flag() {
+        let parsed = Args::try_parse_from(["cargo-behave", "behave", "--fail-on-focus"]);
+        assert!(parsed.is_ok());
+        if let Ok(args) = parsed {
+            assert!(!args.focus);
+            assert!(args.fail_on_focus);
+        }
+    }
+
+    #[test]
+    fn clap_rejects_focus_and_fail_on_focus_together() {
+        let parsed = Args::try_parse_from(["cargo-behave", "behave", "--focus", "--fail-on-focus"]);
+        assert!(parsed.is_err());
+    }
+
+    #[test]
+    fn clap_parses_watch_flag() {
+        let parsed = Args::try_parse_from(["cargo-behave", "behave", "--watch"]);
+        assert!(parsed.is_ok());
+        if let Ok(args) = parsed {
+            assert!(args.watch);
+        }
+    }
+
+    #[test]
+    fn clap_rejects_watch_and_fail_on_focus_together() {
+        let parsed = Args::try_parse_from(["cargo-behave", "behave", "--watch", "--fail-on-focus"]);
+        assert!(parsed.is_err());
+    }
+
+    #[test]
+    fn clap_parses_tag_args() {
+        let parsed = Args::try_parse_from([
+            "cargo-behave",
+            "behave",
+            "--tag",
+            "slow",
+            "--exclude-tag",
+            "flaky",
+        ]);
+        assert!(parsed.is_ok());
+        if let Ok(args) = parsed {
+            assert_eq!(args.tags, vec!["slow"]);
+            assert_eq!(args.exclude_tags, vec!["flaky"]);
+        }
+    }
+
+    #[test]
     fn clap_parses_libtest_separator() {
         let parsed =
             Args::try_parse_from(["cargo-behave", "behave", "checkout", "--", "--nocapture"]);
@@ -586,6 +769,65 @@ mod tests {
     }
 
     #[test]
+    fn filter_by_include_tag() {
+        let results = vec![
+            TestResult::new(
+                "__TAG_slow__test_a".to_string(),
+                behave::cli::parser::TestOutcome::Pass,
+            ),
+            TestResult::new("test_b".to_string(), behave::cli::parser::TestOutcome::Pass),
+        ];
+        let filtered = filter_results_by_tags(&results, &["slow".to_string()], &[]);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].full_name, "__TAG_slow__test_a");
+    }
+
+    #[test]
+    fn filter_by_exclude_tag() {
+        let results = vec![
+            TestResult::new(
+                "__TAG_slow__test_a".to_string(),
+                behave::cli::parser::TestOutcome::Pass,
+            ),
+            TestResult::new("test_b".to_string(), behave::cli::parser::TestOutcome::Pass),
+        ];
+        let filtered = filter_results_by_tags(&results, &[], &["slow".to_string()]);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].full_name, "test_b");
+    }
+
+    #[test]
+    fn filter_exclude_applied_before_include() {
+        let results = vec![
+            TestResult::new(
+                "__TAG_slow____TAG_integration__test".to_string(),
+                behave::cli::parser::TestOutcome::Pass,
+            ),
+            TestResult::new(
+                "__TAG_integration__other".to_string(),
+                behave::cli::parser::TestOutcome::Pass,
+            ),
+        ];
+        let filtered = filter_results_by_tags(
+            &results,
+            &["integration".to_string()],
+            &["slow".to_string()],
+        );
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].full_name, "__TAG_integration__other");
+    }
+
+    #[test]
+    fn filter_no_tags_returns_all() {
+        let results = vec![
+            TestResult::new("test_a".to_string(), behave::cli::parser::TestOutcome::Pass),
+            TestResult::new("test_b".to_string(), behave::cli::parser::TestOutcome::Pass),
+        ];
+        let filtered = filter_results_by_tags(&results, &[], &[]);
+        assert_eq!(filtered.len(), 2);
+    }
+
+    #[test]
     fn sorts_results_by_full_name() {
         let mut results = vec![
             TestResult::new(
@@ -614,5 +856,95 @@ mod tests {
     fn keeps_absolute_history_paths() {
         let path = resolve_history_path(Path::new("/workspace/pkg-a"), "/tmp/history.json");
         assert_eq!(path, PathBuf::from("/tmp/history.json"));
+    }
+
+    #[test]
+    fn filter_multiple_include_tags_union() {
+        let results = vec![
+            TestResult::new(
+                "__TAG_slow__test_a".to_string(),
+                behave::cli::parser::TestOutcome::Pass,
+            ),
+            TestResult::new(
+                "__TAG_fast__test_b".to_string(),
+                behave::cli::parser::TestOutcome::Pass,
+            ),
+            TestResult::new("test_c".to_string(), behave::cli::parser::TestOutcome::Pass),
+        ];
+        let filtered =
+            filter_results_by_tags(&results, &["slow".to_string(), "fast".to_string()], &[]);
+        assert_eq!(filtered.len(), 2);
+    }
+
+    #[test]
+    fn filter_include_no_match_returns_empty() {
+        let results = vec![TestResult::new(
+            "test_a".to_string(),
+            behave::cli::parser::TestOutcome::Pass,
+        )];
+        let filtered = filter_results_by_tags(&results, &["nonexistent".to_string()], &[]);
+        assert!(filtered.is_empty());
+    }
+
+    #[test]
+    fn filter_multiple_exclude_tags() {
+        let results = vec![
+            TestResult::new(
+                "__TAG_slow__test_a".to_string(),
+                behave::cli::parser::TestOutcome::Pass,
+            ),
+            TestResult::new(
+                "__TAG_flaky__test_b".to_string(),
+                behave::cli::parser::TestOutcome::Pass,
+            ),
+            TestResult::new("test_c".to_string(), behave::cli::parser::TestOutcome::Pass),
+        ];
+        let filtered =
+            filter_results_by_tags(&results, &[], &["slow".to_string(), "flaky".to_string()]);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].full_name, "test_c");
+    }
+
+    #[test]
+    fn filter_tag_in_nested_module_path() {
+        let results = vec![TestResult::new(
+            "suite::__TAG_unit__inner::test_a".to_string(),
+            behave::cli::parser::TestOutcome::Pass,
+        )];
+        let filtered = filter_results_by_tags(&results, &["unit".to_string()], &[]);
+        assert_eq!(filtered.len(), 1);
+    }
+
+    #[test]
+    fn clap_parses_multiple_tag_args() {
+        let parsed = Args::try_parse_from([
+            "cargo-behave",
+            "behave",
+            "--tag",
+            "slow",
+            "--tag",
+            "integration",
+            "--exclude-tag",
+            "flaky",
+            "--exclude-tag",
+            "unstable",
+        ]);
+        assert!(parsed.is_ok());
+        if let Ok(args) = parsed {
+            assert_eq!(args.tags, vec!["slow", "integration"]);
+            assert_eq!(args.exclude_tags, vec!["flaky", "unstable"]);
+        }
+    }
+
+    #[test]
+    fn clap_watch_compatible_with_focus() {
+        let parsed = Args::try_parse_from(["cargo-behave", "behave", "--watch", "--focus"]);
+        assert!(parsed.is_ok());
+    }
+
+    #[test]
+    fn clap_watch_compatible_with_tags() {
+        let parsed = Args::try_parse_from(["cargo-behave", "behave", "--watch", "--tag", "slow"]);
+        assert!(parsed.is_ok());
     }
 }

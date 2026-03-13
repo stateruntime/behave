@@ -72,6 +72,8 @@ pub struct Summary {
     pub failed: usize,
     /// Number of ignored tests.
     pub ignored: usize,
+    /// Number of skipped tests (via `skip_when!`).
+    pub skipped: usize,
     /// Total number of parsed tests.
     pub total: usize,
 }
@@ -79,11 +81,18 @@ pub struct Summary {
 impl Summary {
     /// Creates a summary from raw counts.
     #[must_use]
-    pub const fn new(passed: usize, failed: usize, ignored: usize, total: usize) -> Self {
+    pub const fn new(
+        passed: usize,
+        failed: usize,
+        ignored: usize,
+        skipped: usize,
+        total: usize,
+    ) -> Self {
         Self {
             passed,
             failed,
             ignored,
+            skipped,
             total,
         }
     }
@@ -94,8 +103,9 @@ impl Summary {
         let passed = count_by_outcome(results, &TestOutcome::Pass);
         let failed = count_by_outcome(results, &TestOutcome::Fail);
         let ignored = count_by_outcome(results, &TestOutcome::Ignored);
+        let skipped = count_by_outcome(results, &TestOutcome::Skipped);
 
-        Self::new(passed, failed, ignored, results.len())
+        Self::new(passed, failed, ignored, skipped, results.len())
     }
 }
 
@@ -139,12 +149,13 @@ fn count_by_outcome(results: &[TestResult], expected: &TestOutcome) -> usize {
 
 fn write_suite_open(writer: &mut impl Write, report: &Report) -> std::io::Result<()> {
     let errors = usize::from(!report.command_success && report.tests.is_empty());
+    let xml_skipped = report.summary.ignored + report.summary.skipped;
 
     writeln!(writer, r#"<?xml version="1.0" encoding="UTF-8"?>"#)?;
     writeln!(
         writer,
         r#"<testsuite name="cargo-behave" tests="{}" failures="{}" errors="{}" skipped="{}">"#,
-        report.summary.total, report.summary.failed, errors, report.summary.ignored
+        report.summary.total, report.summary.failed, errors, xml_skipped
     )
 }
 
@@ -182,6 +193,14 @@ fn render_testcase(writer: &mut impl Write, test: &TestResult) -> std::io::Resul
         TestOutcome::Ignored => {
             writeln!(writer, r#"    <skipped message="ignored or pending" />"#)?;
         }
+        TestOutcome::Skipped => {
+            let reason = test.skip_reason.as_deref().unwrap_or("skipped at runtime");
+            writeln!(
+                writer,
+                r#"    <skipped message="skipped: {}" />"#,
+                escape_xml(reason)
+            )?;
+        }
     }
 
     writeln!(writer, "  </testcase>")
@@ -209,11 +228,21 @@ fn split_test_name(full_name: &str) -> (String, String) {
 }
 
 fn strip_marker_prefixes(segment: &str) -> String {
-    segment
+    let mut s = segment
         .strip_prefix("__FOCUS__")
         .or_else(|| segment.strip_prefix("__PENDING__"))
-        .unwrap_or(segment)
-        .to_string()
+        .unwrap_or(segment);
+
+    // Strip `__TAG_xxx__` prefixes in a loop
+    while let Some(rest) = s.strip_prefix("__TAG_") {
+        if let Some(end_pos) = rest.find("__") {
+            s = &rest[end_pos + 2..];
+        } else {
+            break;
+        }
+    }
+
+    s.to_string()
 }
 
 fn escape_xml(input: &str) -> String {
@@ -245,7 +274,7 @@ mod tests {
                 TestResult::new("suite::b".to_string(), TestOutcome::Ignored),
                 TestResult::new("suite::c".to_string(), TestOutcome::Fail),
             ],
-            Summary::new(1, 1, 1, 3),
+            Summary::new(1, 1, 1, 0, 3),
         )
         .with_flaky_tests(vec![FlakyTest::new("suite::c".to_string(), 8)])
     }
@@ -290,8 +319,50 @@ mod tests {
     }
 
     #[test]
+    fn summary_counts_skipped_results() {
+        let results = vec![
+            TestResult::new("suite::a".to_string(), TestOutcome::Pass),
+            TestResult::new("suite::b".to_string(), TestOutcome::Skipped),
+            TestResult::new("suite::c".to_string(), TestOutcome::Skipped),
+        ];
+        let summary = Summary::from_results(&results);
+        assert_eq!(summary.passed, 1);
+        assert_eq!(summary.skipped, 2);
+        assert_eq!(summary.total, 3);
+    }
+
+    #[test]
+    fn renders_junit_skipped_testcase() {
+        let mut test = TestResult::new("suite::skip_me".to_string(), TestOutcome::Skipped);
+        test.skip_reason = Some("not on CI".to_string());
+        let report = Report::new(true, vec![test], Summary::new(0, 0, 0, 1, 1));
+        let mut buffer = Vec::new();
+        let result = render_junit(&mut buffer, &report);
+        assert!(result.is_ok());
+        let output = String::from_utf8(buffer).unwrap_or_default();
+        assert!(output.contains(r#"<skipped message="skipped: not on CI" />"#));
+    }
+
+    #[test]
+    fn renders_json_skipped_outcome() {
+        let report = Report::new(
+            true,
+            vec![TestResult::new(
+                "suite::a".to_string(),
+                TestOutcome::Skipped,
+            )],
+            Summary::new(0, 0, 0, 1, 1),
+        );
+        let mut buffer = Vec::new();
+        let result = render_json(&mut buffer, &report);
+        assert!(result.is_ok());
+        let output = String::from_utf8(buffer).unwrap_or_default();
+        assert!(output.contains("\"Skipped\""));
+    }
+
+    #[test]
     fn renders_junit_command_failure_case() {
-        let report = Report::new(false, Vec::new(), Summary::new(0, 0, 0, 0))
+        let report = Report::new(false, Vec::new(), Summary::new(0, 0, 0, 0, 0))
             .with_stderr("compile error".to_string());
         let mut buffer = Vec::new();
         let result = render_junit(&mut buffer, &report);
@@ -318,5 +389,100 @@ mod tests {
 
         assert_eq!(classname, "checkout");
         assert_eq!(name, "alpha_case");
+    }
+
+    #[test]
+    fn strips_tag_prefixes_from_test_name() {
+        let (classname, name) =
+            split_test_name("__TAG_slow____TAG_integration__suite::__TAG_unit__my_test");
+
+        assert_eq!(classname, "suite");
+        assert_eq!(name, "my_test");
+    }
+
+    #[test]
+    fn strips_focus_and_tag_combined() {
+        let (classname, name) = split_test_name("__FOCUS____TAG_critical__suite::my_test");
+
+        assert_eq!(classname, "suite");
+        assert_eq!(name, "my_test");
+    }
+
+    #[test]
+    fn junit_skipped_count_includes_ignored_and_skipped() {
+        let report = Report::new(
+            true,
+            vec![
+                TestResult::new("a".to_string(), TestOutcome::Ignored),
+                TestResult::new("b".to_string(), TestOutcome::Skipped),
+            ],
+            Summary::new(0, 0, 1, 1, 2),
+        );
+        let mut buffer = Vec::new();
+        let result = render_junit(&mut buffer, &report);
+        assert!(result.is_ok());
+        let output = String::from_utf8(buffer).unwrap_or_default();
+        assert!(output.contains(r#"skipped="2""#));
+    }
+
+    #[test]
+    fn junit_skip_reason_escapes_xml() {
+        let mut test = TestResult::new("suite::t".to_string(), TestOutcome::Skipped);
+        test.skip_reason = Some("needs <env> & $TOKEN".to_string());
+        let report = Report::new(true, vec![test], Summary::new(0, 0, 0, 1, 1));
+        let mut buffer = Vec::new();
+        let result = render_junit(&mut buffer, &report);
+        assert!(result.is_ok());
+        let output = String::from_utf8(buffer).unwrap_or_default();
+        assert!(output.contains("needs &lt;env&gt; &amp; $TOKEN"));
+    }
+
+    #[test]
+    fn summary_from_results_counts_all_outcomes() {
+        let results = vec![
+            TestResult::new("a".to_string(), TestOutcome::Pass),
+            TestResult::new("b".to_string(), TestOutcome::Pass),
+            TestResult::new("c".to_string(), TestOutcome::Fail),
+            TestResult::new("d".to_string(), TestOutcome::Ignored),
+            TestResult::new("e".to_string(), TestOutcome::Skipped),
+            TestResult::new("f".to_string(), TestOutcome::Skipped),
+        ];
+        let summary = Summary::from_results(&results);
+        assert_eq!(summary.passed, 2);
+        assert_eq!(summary.failed, 1);
+        assert_eq!(summary.ignored, 1);
+        assert_eq!(summary.skipped, 2);
+        assert_eq!(summary.total, 6);
+    }
+
+    #[test]
+    fn renders_json_with_skip_reason() {
+        let mut test = TestResult::new("suite::a".to_string(), TestOutcome::Skipped);
+        test.skip_reason = Some("not on CI".to_string());
+        let report = Report::new(true, vec![test], Summary::new(0, 0, 0, 1, 1));
+        let mut buffer = Vec::new();
+        let result = render_json(&mut buffer, &report);
+        assert!(result.is_ok());
+        let output = String::from_utf8(buffer).unwrap_or_default();
+        assert!(output.contains("\"not on CI\""));
+    }
+
+    #[test]
+    fn split_test_name_single_segment() {
+        let (classname, name) = split_test_name("standalone_test");
+        assert_eq!(classname, "");
+        assert_eq!(name, "standalone_test");
+    }
+
+    #[test]
+    fn split_test_name_deep_nesting() {
+        let (classname, name) = split_test_name("a::b::c::d::leaf");
+        assert_eq!(classname, "a::b::c::d");
+        assert_eq!(name, "leaf");
+    }
+
+    #[test]
+    fn escape_xml_handles_apostrophes() {
+        assert_eq!(escape_xml("it's"), "it&apos;s");
     }
 }
