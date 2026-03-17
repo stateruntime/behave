@@ -52,21 +52,29 @@
 //! | `.to_be_less_than(v)` | Strictly less |
 //! | `.to_be_at_least(v)` | Greater or equal (`>=`) |
 //! | `.to_be_at_most(v)` | Less or equal (`<=`) |
+//! | `.to_be_between(low, high)` | Inclusive range check |
 //! | **Option** | |
 //! | `.to_be_some()` | Value is `Some(_)` |
 //! | `.to_be_none()` | Value is `None` |
 //! | `.to_be_some_with(v)` | Value is `Some(v)` |
+//! | `.to_be_some_and(f, desc)` | `Some(_)` satisfying predicate |
 //! | **Result** | |
 //! | `.to_be_ok()` | Value is `Ok(_)` |
 //! | `.to_be_err()` | Value is `Err(_)` |
 //! | `.to_be_ok_with(v)` | Value is `Ok(v)` |
 //! | `.to_be_err_with(v)` | Value is `Err(v)` |
+//! | `.to_be_ok_and(f, desc)` | `Ok(_)` satisfying predicate |
+//! | `.to_be_err_and(f, desc)` | `Err(_)` satisfying predicate |
 //! | **Collections** (`Vec<T>`, `&[T]`) | |
 //! | `.to_contain(v)` | Contains element |
 //! | `.to_contain_all_of(&[..])` | Contains every element |
 //! | `.to_be_empty()` | Length is zero |
 //! | `.to_not_be_empty()` | Length is non-zero |
 //! | `.to_have_length(n)` | Exact length |
+//! | `.to_all_satisfy(f, desc)` | All elements match predicate |
+//! | `.to_any_satisfy(f, desc)` | At least one matches |
+//! | `.to_none_satisfy(f, desc)` | No elements match |
+//! | `.to_contain_any_of(&[..])` | Contains at least one of |
 //! | **Strings** | |
 //! | `.to_start_with(s)` | Has prefix |
 //! | `.to_end_with(s)` | Has suffix |
@@ -75,6 +83,7 @@
 //! | `.to_have_char_count(n)` | Unicode character count |
 //! | `.to_be_empty()` | String is empty |
 //! | `.to_not_be_empty()` | String is non-empty |
+//! | `.to_equal_ignoring_case(s)` | ASCII case-insensitive equality |
 //! | **Floating-Point** | |
 //! | `.to_approximately_equal(v)` | Within default epsilon |
 //! | `.to_approximately_equal_within(v, e)` | Within custom epsilon |
@@ -89,6 +98,7 @@
 //! | `.to_start_with_elements(&[..])` | Prefix match |
 //! | `.to_end_with_elements(&[..])` | Suffix match |
 //! | `.to_be_sorted()` | Non-descending order |
+//! | `.to_be_sorted_by_key(f, desc)` | Sorted by extracted key |
 //! | **Sets** (`HashSet`, `BTreeSet`) | |
 //! | `.to_contain(&v)` | Set has element |
 //! | `.to_be_subset_of(&set)` | All elements in other set |
@@ -121,6 +131,17 @@
 //! | `.to_have_query_param(k)` | Query param exists |
 //! | `.to_have_query_param_value(k, v)` | Query param has value |
 //! | `.to_have_fragment(f)` | URL fragment |
+//! | **Display / Debug** | |
+//! | `.to_display_as(s)` | `Display` output matches |
+//! | `.to_display_containing(s)` | `Display` output contains substring |
+//! | `.to_debug_containing(s)` | `Debug` output contains substring |
+//! | **Duration** | |
+//! | `.to_be_shorter_than(d)` | Duration less than bound |
+//! | `.to_be_longer_than(d)` | Duration greater than bound |
+//! | `.to_be_close_to_duration(d, tol)` | Within tolerance of expected |
+//! | **Error Chain** | |
+//! | `.to_have_source()` | Error has a source |
+//! | `.to_have_source_containing(s)` | Source message contains substring |
 //! | **General** | |
 //! | `.to_satisfy(f, desc)` | Custom predicate function |
 //! | `.to_match(m)` | Custom [`BehaveMatch`] impl |
@@ -235,7 +256,7 @@ pub use soft::{SoftErrors, SoftMatchError};
 #[macro_export]
 macro_rules! expect {
     ($expr:expr) => {
-        $crate::Expectation::new($expr, stringify!($expr))
+        $crate::Expectation::new_located($expr, stringify!($expr), file!(), line!())
     };
 }
 
@@ -269,7 +290,8 @@ macro_rules! expect_panic {
                 "to panic".to_string(),
                 "did not panic".to_string(),
                 false,
-            ))
+            )
+            .with_location(Some(file!()), Some(line!())))
         } else {
             Ok(())
         }
@@ -299,15 +321,24 @@ macro_rules! expect_no_panic {
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             $expr;
         }));
-        if result.is_err() {
-            Err($crate::MatchError::new(
-                stringify!($expr).to_string(),
-                "to not panic".to_string(),
-                "panicked".to_string(),
-                false,
-            ))
-        } else {
-            Ok(())
+        match result {
+            Ok(()) => Ok(()),
+            Err(payload) => {
+                let msg = if let Some(s) = payload.downcast_ref::<&str>() {
+                    format!("panicked with: {s}")
+                } else if let Some(s) = payload.downcast_ref::<String>() {
+                    format!("panicked with: {s}")
+                } else {
+                    "panicked".to_string()
+                };
+                Err($crate::MatchError::new(
+                    stringify!($expr).to_string(),
+                    "to not panic".to_string(),
+                    msg,
+                    false,
+                )
+                .with_location(Some(file!()), Some(line!())))
+            }
         }
     }};
 }
@@ -346,7 +377,8 @@ macro_rules! expect_match {
                 concat!("to match pattern ", stringify!($($pattern)|+ $(if $guard)?)).to_string(),
                 format!("{:?}", __behave_val),
                 false,
-            ))
+            )
+            .with_location(Some(file!()), Some(line!())))
         }
     }};
 }

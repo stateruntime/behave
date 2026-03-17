@@ -26,6 +26,8 @@ pub enum CliError {
         source: std::io::Error,
     },
     /// Failed to parse test output.
+    ///
+    /// Reserved for future use by structured output parsers.
     OutputParse {
         /// The line that could not be parsed.
         line: String,
@@ -70,13 +72,21 @@ pub enum CliError {
         /// Description of the error.
         message: String,
     },
+    /// Failed to parse a `--filter` expression.
+    FilterParse {
+        /// Description of the parse error.
+        message: String,
+    },
 }
 
 impl fmt::Display for CliError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::CargoInvocation { source } => {
-                write!(f, "failed to invoke cargo test: {source}")
+                write!(
+                    f,
+                    "failed to invoke cargo test: {source}\n  hint: is `cargo` installed and in your PATH?"
+                )
             }
             Self::OutputParse { line } => {
                 write!(f, "failed to parse test output line: {line}")
@@ -86,11 +96,17 @@ impl fmt::Display for CliError {
                 write!(f, "failed to load cargo metadata: {message}")
             }
             Self::ConfigParse { message } => {
-                write!(f, "failed to parse behave.toml: {message}")
+                write!(
+                    f,
+                    "failed to parse behave.toml: {message}\n  hint: check TOML syntax at https://toml.io"
+                )
             }
             Self::HistoryIo { source } => write!(f, "history file error: {source}"),
             Self::PackageSelection { spec } => {
-                write!(f, "could not resolve package selection for {spec}")
+                write!(
+                    f,
+                    "could not resolve package selection for {spec}\n  hint: check that the package name matches a workspace member"
+                )
             }
             Self::UnsupportedLibtestArg { arg } => {
                 write!(f, "unsupported libtest argument for cargo-behave: {arg}")
@@ -103,6 +119,12 @@ impl fmt::Display for CliError {
             }
             Self::WatchInit { message } => {
                 write!(f, "failed to initialize watch mode: {message}")
+            }
+            Self::FilterParse { message } => {
+                write!(
+                    f,
+                    "invalid filter expression: {message}\n  syntax: tag(name), name(pattern), and/or/not, parentheses"
+                )
             }
         }
     }
@@ -120,7 +142,8 @@ impl std::error::Error for CliError {
             | Self::PackageSelection { .. }
             | Self::UnsupportedLibtestArg { .. }
             | Self::FocusedTestsFound { .. }
-            | Self::WatchInit { .. } => None,
+            | Self::WatchInit { .. }
+            | Self::FilterParse { .. } => None,
         }
     }
 }
@@ -143,6 +166,7 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("failed to invoke cargo test"));
         assert!(msg.contains("not found"));
+        assert!(msg.contains("hint:"));
     }
 
     #[test]
@@ -296,5 +320,23 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("failed to initialize watch mode"));
         assert!(msg.contains("no directory"));
+    }
+
+    #[test]
+    fn display_filter_parse() {
+        let err = CliError::FilterParse {
+            message: "unexpected token".to_string(),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("invalid filter expression"));
+        assert!(msg.contains("unexpected token"));
+    }
+
+    #[test]
+    fn source_filter_parse_is_none() {
+        let err = CliError::FilterParse {
+            message: "err".to_string(),
+        };
+        assert!(std::error::Error::source(&err).is_none());
     }
 }

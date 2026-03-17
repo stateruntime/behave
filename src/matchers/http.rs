@@ -288,6 +288,98 @@ mod tests {
             .is_ok());
     }
 
+    // --- Boundary status code tests ---
+
+    #[test]
+    fn to_be_success_boundary_200() {
+        assert!(
+            Expectation::new(StatusCode::from_u16(200).unwrap_or(StatusCode::OK), "s")
+                .to_be_success()
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn to_be_success_boundary_299() {
+        assert!(
+            Expectation::new(StatusCode::from_u16(299).unwrap_or(StatusCode::OK), "s")
+                .to_be_success()
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn to_be_success_boundary_199() {
+        assert!(
+            Expectation::new(StatusCode::from_u16(199).unwrap_or(StatusCode::OK), "s")
+                .to_be_success()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn to_be_success_boundary_300() {
+        assert!(
+            Expectation::new(StatusCode::from_u16(300).unwrap_or(StatusCode::OK), "s")
+                .to_be_success()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn to_be_redirect_boundary_300() {
+        assert!(
+            Expectation::new(StatusCode::from_u16(300).unwrap_or(StatusCode::OK), "s")
+                .to_be_redirect()
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn to_be_redirect_boundary_399() {
+        assert!(
+            Expectation::new(StatusCode::from_u16(399).unwrap_or(StatusCode::OK), "s")
+                .to_be_redirect()
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn to_be_client_error_boundary_400() {
+        assert!(
+            Expectation::new(StatusCode::from_u16(400).unwrap_or(StatusCode::OK), "s")
+                .to_be_client_error()
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn to_be_client_error_boundary_499() {
+        assert!(
+            Expectation::new(StatusCode::from_u16(499).unwrap_or(StatusCode::OK), "s")
+                .to_be_client_error()
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn to_be_server_error_boundary_500() {
+        assert!(
+            Expectation::new(StatusCode::from_u16(500).unwrap_or(StatusCode::OK), "s")
+                .to_be_server_error()
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn to_be_server_error_boundary_599() {
+        assert!(
+            Expectation::new(StatusCode::from_u16(599).unwrap_or(StatusCode::OK), "s")
+                .to_be_server_error()
+                .is_ok()
+        );
+    }
+
     // --- HeaderMap ---
 
     #[test]

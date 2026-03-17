@@ -74,6 +74,8 @@ pub struct Summary {
     pub ignored: usize,
     /// Number of skipped tests (via `skip_when!`).
     pub skipped: usize,
+    /// Number of flaky tests (failed then passed on retry).
+    pub flaky: usize,
     /// Total number of parsed tests.
     pub total: usize,
 }
@@ -93,6 +95,7 @@ impl Summary {
             failed,
             ignored,
             skipped,
+            flaky: 0,
             total,
         }
     }
@@ -104,18 +107,43 @@ impl Summary {
         let failed = count_by_outcome(results, &TestOutcome::Fail);
         let ignored = count_by_outcome(results, &TestOutcome::Ignored);
         let skipped = count_by_outcome(results, &TestOutcome::Skipped);
+        let flaky = count_by_outcome(results, &TestOutcome::Flaky);
 
-        Self::new(passed, failed, ignored, skipped, results.len())
+        let mut summary = Self::new(passed, failed, ignored, skipped, results.len());
+        summary.flaky = flaky;
+        summary
     }
 }
 
 /// Renders a report as JSON.
 ///
+/// Test names have internal marker prefixes (`__FOCUS__`, `__PENDING__`,
+/// `__TAG_xxx__`) stripped before serialization.
+///
 /// # Errors
 ///
 /// Returns an IO error if writing fails.
 pub fn render_json(writer: &mut impl Write, report: &Report) -> std::io::Result<()> {
-    serde_json::to_writer_pretty(&mut *writer, report)
+    let clean_tests: Vec<TestResult> = report
+        .tests
+        .iter()
+        .map(|t| {
+            let mut clean = t.clone();
+            clean.full_name = t
+                .full_name
+                .split("::")
+                .map(strip_marker_prefixes)
+                .collect::<Vec<_>>()
+                .join("::");
+            clean
+        })
+        .collect();
+    let summary = Summary::from_results(&clean_tests);
+    let clean_report = Report::new(report.command_success, clean_tests, summary)
+        .with_tree(report.tree.clone())
+        .with_flaky_tests(report.flaky_tests.clone())
+        .with_stderr(report.stderr.clone());
+    serde_json::to_writer_pretty(&mut *writer, &clean_report)
         .map_err(|err| std::io::Error::other(err.to_string()))?;
     writeln!(writer)
 }
@@ -174,9 +202,10 @@ fn render_command_failure_case(writer: &mut impl Write, stderr: &str) -> std::io
 
 fn render_testcase(writer: &mut impl Write, test: &TestResult) -> std::io::Result<()> {
     let (classname, name) = split_test_name(&test.full_name);
+    let time = test.duration_secs.unwrap_or(0.0);
     writeln!(
         writer,
-        r#"  <testcase classname="{}" name="{}">"#,
+        r#"  <testcase classname="{}" name="{}" time="{time:.3}">"#,
         escape_xml(&classname),
         escape_xml(&name)
     )?;
@@ -184,10 +213,13 @@ fn render_testcase(writer: &mut impl Write, test: &TestResult) -> std::io::Resul
     match test.outcome {
         TestOutcome::Pass => {}
         TestOutcome::Fail => {
+            let body = test.failure_message.as_deref().map_or_else(
+                || format!("test {} failed", escape_xml(&test.full_name)),
+                escape_xml,
+            );
             writeln!(
                 writer,
-                r#"    <failure message="test failed">test {} failed</failure>"#,
-                escape_xml(&test.full_name)
+                r#"    <failure message="test failed">{body}</failure>"#
             )?;
         }
         TestOutcome::Ignored => {
@@ -199,6 +231,12 @@ fn render_testcase(writer: &mut impl Write, test: &TestResult) -> std::io::Resul
                 writer,
                 r#"    <skipped message="skipped: {}" />"#,
                 escape_xml(reason)
+            )?;
+        }
+        TestOutcome::Flaky => {
+            writeln!(
+                writer,
+                "    <system-out>flaky: initially failed, passed on retry</system-out>"
             )?;
         }
     }
@@ -255,6 +293,8 @@ fn escape_xml(input: &str) -> String {
             '>' => escaped.push_str("&gt;"),
             '"' => escaped.push_str("&quot;"),
             '\'' => escaped.push_str("&apos;"),
+            // Strip control chars illegal in XML 1.0 (keep tab, newline, carriage return)
+            ch if ch.is_control() && ch != '\t' && ch != '\n' && ch != '\r' => {}
             _ => escaped.push(ch),
         }
     }
@@ -484,5 +524,60 @@ mod tests {
     #[test]
     fn escape_xml_handles_apostrophes() {
         assert_eq!(escape_xml("it's"), "it&apos;s");
+    }
+
+    #[test]
+    fn escape_xml_strips_control_chars() {
+        let input = "hello\x00world\x07test";
+        let escaped = escape_xml(input);
+        assert_eq!(escaped, "helloworldtest");
+    }
+
+    #[test]
+    fn escape_xml_preserves_tab_newline_cr() {
+        let input = "line1\nline2\ttab\rreturn";
+        let escaped = escape_xml(input);
+        assert_eq!(escaped, "line1\nline2\ttab\rreturn");
+    }
+
+    #[test]
+    fn junit_testcase_has_time_attribute() {
+        let report = Report::new(
+            true,
+            vec![TestResult::new("a".to_string(), TestOutcome::Pass)],
+            Summary::new(1, 0, 0, 0, 1),
+        );
+        let mut buffer = Vec::new();
+        render_junit(&mut buffer, &report).ok();
+        let output = String::from_utf8(buffer).unwrap_or_default();
+        assert!(output.contains("time=\"0.000\""));
+    }
+
+    #[test]
+    fn json_strips_marker_prefixes() {
+        let report = Report::new(
+            true,
+            vec![TestResult::new(
+                "__FOCUS____TAG_slow__suite::test".to_string(),
+                TestOutcome::Pass,
+            )],
+            Summary::new(1, 0, 0, 0, 1),
+        );
+        let mut buffer = Vec::new();
+        render_json(&mut buffer, &report).ok();
+        let output = String::from_utf8(buffer).unwrap_or_default();
+        assert!(output.contains("\"suite::test\""));
+        assert!(!output.contains("__FOCUS__"));
+    }
+
+    #[test]
+    fn junit_includes_failure_message() {
+        let mut test = TestResult::new("suite::fail".to_string(), TestOutcome::Fail);
+        test.failure_message = Some("expected 1, got 2".to_string());
+        let report = Report::new(true, vec![test], Summary::new(0, 1, 0, 0, 1));
+        let mut buffer = Vec::new();
+        render_junit(&mut buffer, &report).ok();
+        let output = String::from_utf8(buffer).unwrap_or_default();
+        assert!(output.contains("expected 1, got 2"));
     }
 }

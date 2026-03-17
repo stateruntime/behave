@@ -1047,3 +1047,402 @@ mod shared_imports {
         }
     }
 }
+
+// --- v0.9.0 matchers ---
+
+mod v090_matchers {
+    use behave::prelude::*;
+
+    behave! {
+        "v0.9.0 matchers" {
+            "range matcher" {
+                expect!(5).to_be_between(1, 10)?;
+                expect!(1).to_be_between(1, 10)?;
+                expect!(10).to_be_between(1, 10)?;
+            }
+
+            "case insensitive string" {
+                expect!("Hello World").to_equal_ignoring_case("hello world")?;
+            }
+
+            "option predicate" {
+                expect!(Some(42)).to_be_some_and(|v| *v > 0, "to be positive")?;
+            }
+
+            "result predicates" {
+                let ok_val: Result<i32, &str> = Ok(42);
+                expect!(ok_val).to_be_ok_and(|v| *v > 0, "to be positive")?;
+
+                let err_val: Result<i32, String> = Err("timeout".to_string());
+                expect!(err_val)
+                    .to_be_err_and(|e| e.contains("timeout"), "to contain timeout")?;
+            }
+
+            "collection predicates" {
+                expect!(vec![2, 4, 6]).to_all_satisfy(|x| x % 2 == 0, "to be even")?;
+                expect!(vec![1, 2, 3]).to_any_satisfy(|x| x % 2 == 0, "to be even")?;
+                expect!(vec![1, 3, 5]).to_none_satisfy(|x| x % 2 == 0, "to be even")?;
+                expect!(vec![1, 2, 3]).to_contain_any_of(&[9, 2])?;
+            }
+
+            "sorted by key" {
+                expect!(vec!["a", "bb", "ccc"])
+                    .to_be_sorted_by_key(|s| s.len(), "by length")?;
+            }
+
+            "display matchers" {
+                expect!(42).to_display_as("42")?;
+                expect!(42).to_display_containing("4")?;
+                expect!(vec![1, 2]).to_debug_containing("[1, 2]")?;
+            }
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+mod v090_std_matchers {
+    use behave::prelude::*;
+    use std::time::Duration;
+
+    behave! {
+        "v0.9.0 std matchers" {
+            "duration matchers" {
+                expect!(Duration::from_millis(500))
+                    .to_be_shorter_than(Duration::from_secs(1))?;
+                expect!(Duration::from_secs(2))
+                    .to_be_longer_than(Duration::from_secs(1))?;
+                expect!(Duration::from_millis(1050))
+                    .to_be_close_to_duration(
+                        Duration::from_secs(1),
+                        Duration::from_millis(100),
+                    )?;
+            }
+
+            "error chain matchers" {
+                use std::io;
+                use std::fmt;
+
+                #[derive(Debug)]
+                struct Wrapper(io::Error);
+
+                impl fmt::Display for Wrapper {
+                    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                        write!(f, "wrapper: {}", self.0)
+                    }
+                }
+
+                impl std::error::Error for Wrapper {
+                    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+                        Some(&self.0)
+                    }
+                }
+
+                let err = Wrapper(io::Error::other("connection timeout"));
+                expect!(err).to_have_source()?;
+            }
+
+            "path matchers" {
+                use std::path::PathBuf;
+
+                let cargo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
+                expect!(cargo.clone()).to_exist()?;
+                expect!(cargo.clone()).to_be_a_file()?;
+                expect!(cargo).to_have_extension("toml")?;
+
+                let src = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src");
+                expect!(src).to_be_a_directory()?;
+            }
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+mod v090_expect_match {
+    use behave::prelude::*;
+
+    #[derive(Debug)]
+    enum Status {
+        Active,
+        #[allow(dead_code)]
+        Inactive,
+    }
+
+    behave! {
+        "expect_match macro" {
+            "matches enum variant" {
+                expect_match!(Status::Active, Status::Active)?;
+            }
+
+            "matches with guard" {
+                expect_match!(Some(42), Some(v) if *v > 0)?;
+            }
+        }
+    }
+}
+
+#[cfg(feature = "json")]
+mod v090_json_matchers {
+    use behave::prelude::*;
+
+    behave! {
+        "json matchers" {
+            "has field" {
+                let val: serde_json::Value = serde_json::json!({"name": "Alice", "age": 30});
+                expect!(val.clone()).to_have_field("name")?;
+                expect!(val).to_have_field_value("age", &serde_json::json!(30))?;
+            }
+
+            "json superset" {
+                let actual: serde_json::Value =
+                    serde_json::json!({"a": 1, "b": 2, "c": 3});
+                let expected: serde_json::Value = serde_json::json!({"a": 1, "b": 2});
+                expect!(actual).to_be_json_superset_of(&expected)?;
+            }
+        }
+    }
+}
+
+#[cfg(feature = "http")]
+mod v090_http_matchers {
+    use behave::prelude::*;
+
+    behave! {
+        "http matchers" {
+            "status codes" {
+                expect!(http::StatusCode::OK).to_be_success()?;
+                expect!(http::StatusCode::MOVED_PERMANENTLY).to_be_redirect()?;
+                expect!(http::StatusCode::NOT_FOUND).to_be_client_error()?;
+                expect!(http::StatusCode::INTERNAL_SERVER_ERROR).to_be_server_error()?;
+                expect!(http::StatusCode::OK).to_have_status_code(200)?;
+            }
+
+            "headers" {
+                let mut headers = http::HeaderMap::new();
+                headers.insert(
+                    http::header::CONTENT_TYPE,
+                    http::HeaderValue::from_static("application/json"),
+                );
+                expect!(headers.clone()).to_have_header("content-type")?;
+                expect!(headers).to_have_header_value("content-type", "application/json")?;
+            }
+        }
+    }
+}
+
+// --- Negative test cases (Fix 31) ---
+// These tests intentionally trigger failures and verify the error messages.
+
+mod negative_tests {
+    use behave::prelude::*;
+
+    #[test]
+    fn to_equal_failure_shows_actual_and_expected() {
+        let result = expect!(42).to_equal(99);
+        assert!(result.is_err());
+        if let Err(err) = result {
+            let msg = err.to_string();
+            assert!(msg.contains("42"), "error should contain actual value");
+            assert!(msg.contains("99"), "error should contain expected value");
+        }
+    }
+
+    #[test]
+    fn to_be_true_failure_shows_false() {
+        let result = expect!(false).to_be_true();
+        assert!(result.is_err());
+        if let Err(err) = result {
+            let msg = err.to_string();
+            assert!(msg.contains("false"), "error should show actual: false");
+        }
+    }
+
+    #[test]
+    fn to_be_false_failure_shows_true() {
+        let result = expect!(true).to_be_false();
+        assert!(result.is_err());
+        if let Err(err) = result {
+            let msg = err.to_string();
+            assert!(msg.contains("true"), "error should show actual: true");
+        }
+    }
+
+    #[test]
+    fn to_contain_failure_shows_element() {
+        let result = expect!(vec![1, 2, 3]).to_contain(9);
+        assert!(result.is_err());
+        if let Err(err) = result {
+            let msg = err.to_string();
+            assert!(msg.contains('9'), "error should show missing element");
+        }
+    }
+
+    #[test]
+    fn to_be_some_failure_on_none() {
+        let result = expect!(None::<i32>).to_be_some();
+        assert!(result.is_err());
+        if let Err(err) = result {
+            let msg = err.to_string();
+            assert!(msg.contains("None"), "error should show actual: None");
+        }
+    }
+
+    #[test]
+    fn to_be_none_failure_on_some() {
+        let result = expect!(Some(42)).to_be_none();
+        assert!(result.is_err());
+        if let Err(err) = result {
+            let msg = err.to_string();
+            assert!(msg.contains("42"), "error should show the Some value");
+        }
+    }
+
+    #[test]
+    fn negated_to_equal_failure_shows_not() {
+        let result = expect!(42).not().to_equal(42);
+        assert!(result.is_err());
+        if let Err(err) = result {
+            let msg = err.to_string();
+            assert!(msg.contains("not"), "negated error should contain 'not'");
+        }
+    }
+
+    #[test]
+    fn to_start_with_failure_shows_strings() {
+        let result = expect!("hello").to_start_with("xyz");
+        assert!(result.is_err());
+        if let Err(err) = result {
+            let msg = err.to_string();
+            assert!(msg.contains("hello"), "error should show actual string");
+            assert!(msg.contains("xyz"), "error should show expected prefix");
+        }
+    }
+
+    #[test]
+    fn to_be_greater_than_failure() {
+        let result = expect!(3).to_be_greater_than(10);
+        assert!(result.is_err());
+        if let Err(err) = result {
+            let msg = err.to_string();
+            assert!(msg.contains('3'), "error should show actual value");
+            assert!(msg.contains("10"), "error should show threshold");
+        }
+    }
+
+    #[test]
+    fn to_have_length_failure_shows_lengths() {
+        let result = expect!(vec![1, 2]).to_have_length(5);
+        assert!(result.is_err());
+        if let Err(err) = result {
+            let msg = err.to_string();
+            assert!(msg.contains('5'), "error should show expected length");
+        }
+    }
+
+    #[test]
+    fn to_be_empty_failure_on_nonempty() {
+        let result = expect!(vec![1]).to_be_empty();
+        assert!(result.is_err());
+        if let Err(err) = result {
+            let msg = err.to_string();
+            assert!(msg.contains("[1]"), "error should show actual collection");
+        }
+    }
+
+    #[test]
+    fn to_be_ok_failure_on_err() {
+        let val: Result<i32, &str> = Err("oops");
+        let result = expect!(val).to_be_ok();
+        assert!(result.is_err());
+        if let Err(err) = result {
+            let msg = err.to_string();
+            assert!(msg.contains("oops"), "error should show the Err value");
+        }
+    }
+}
+
+#[cfg(feature = "url")]
+mod v090_url_matchers {
+    use behave::prelude::*;
+
+    /// Parses a URL from a string literal, aborting on invalid input.
+    ///
+    /// All URLs in these tests are known-valid literals, so the error branch
+    /// is unreachable in practice.
+    fn parse_url(s: &str) -> url::Url {
+        url::Url::parse(s).unwrap_or_else(|_| std::process::abort())
+    }
+
+    behave! {
+        "url matchers" {
+            "url components" {
+                let url = parse_url("https://example.com/path?key=val#frag");
+                expect!(url.clone()).to_have_scheme("https")?;
+                expect!(url.clone()).to_have_host("example.com")?;
+                expect!(url.clone()).to_have_path("/path")?;
+                expect!(url.clone()).to_have_query_param("key")?;
+                expect!(url.clone()).to_have_query_param_value("key", "val")?;
+                expect!(url).to_have_fragment("frag")?;
+            }
+        }
+    }
+
+    // --- URL negative tests (Fix 33) ---
+
+    #[test]
+    fn url_wrong_scheme_error() {
+        let url = parse_url("https://example.com");
+        let result = expect!(url).to_have_scheme("ftp");
+        assert!(result.is_err());
+        if let Err(err) = result {
+            let msg = err.to_string();
+            assert!(msg.contains("ftp"), "error should show expected scheme");
+        }
+    }
+
+    #[test]
+    fn url_wrong_host_error() {
+        let url = parse_url("https://example.com");
+        let result = expect!(url).to_have_host("other.com");
+        assert!(result.is_err());
+        if let Err(err) = result {
+            let msg = err.to_string();
+            assert!(msg.contains("other.com"), "error should show expected host");
+        }
+    }
+
+    #[test]
+    fn url_wrong_path_error() {
+        let url = parse_url("https://example.com/actual");
+        let result = expect!(url).to_have_path("/expected");
+        assert!(result.is_err());
+        if let Err(err) = result {
+            let msg = err.to_string();
+            assert!(msg.contains("/expected"), "error should show expected path");
+        }
+    }
+
+    #[test]
+    fn url_missing_query_param_error() {
+        let url = parse_url("https://example.com");
+        let result = expect!(url).to_have_query_param("missing");
+        assert!(result.is_err());
+        if let Err(err) = result {
+            let msg = err.to_string();
+            assert!(msg.contains("missing"), "error should show expected param");
+        }
+    }
+
+    #[test]
+    fn url_wrong_fragment_error() {
+        let url = parse_url("https://example.com#actual");
+        let result = expect!(url).to_have_fragment("expected");
+        assert!(result.is_err());
+        if let Err(err) = result {
+            let msg = err.to_string();
+            assert!(
+                msg.contains("expected"),
+                "error should show expected fragment"
+            );
+        }
+    }
+}

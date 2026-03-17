@@ -52,6 +52,40 @@ impl<T: Debug> Expectation<Option<T>> {
     }
 }
 
+impl<T: Debug> Expectation<Option<T>> {
+    /// Asserts the option is `Some` and the inner value satisfies a predicate.
+    ///
+    /// The `desc` argument appears in failure messages (e.g. `"to be positive"`).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MatchError`] if the value is `None` or the predicate returns `false`.
+    ///
+    /// ```text
+    /// expect!(opt)
+    ///   actual: Some(0)
+    /// expected: to be Some(_) and to be positive
+    /// ```
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use behave::Expectation;
+    ///
+    /// let result = Expectation::new(Some(42), "x")
+    ///     .to_be_some_and(|v| *v > 0, "to be positive");
+    /// assert!(result.is_ok());
+    /// ```
+    pub fn to_be_some_and(
+        &self,
+        predicate: impl FnOnce(&T) -> bool,
+        desc: &str,
+    ) -> Result<(), MatchError> {
+        let is_match = self.value().as_ref().is_some_and(predicate);
+        self.check(is_match, format!("to be Some(_) and {desc}"))
+    }
+}
+
 impl<T: Debug + PartialEq> Expectation<Option<T>> {
     /// Asserts the option is `Some` containing the expected value.
     ///
@@ -158,5 +192,36 @@ mod tests {
             .negate()
             .to_be_some_with(42)
             .is_err());
+    }
+
+    // --- to_be_some_and ---
+
+    #[test]
+    fn to_be_some_and_pass() {
+        assert!(Expectation::new(Some(42), "x")
+            .to_be_some_and(|v| *v > 0, "to be positive")
+            .is_ok());
+    }
+
+    #[test]
+    fn to_be_some_and_fail_none() {
+        assert!(Expectation::new(None::<i32>, "x")
+            .to_be_some_and(|v| *v > 0, "to be positive")
+            .is_err());
+    }
+
+    #[test]
+    fn to_be_some_and_fail_predicate() {
+        assert!(Expectation::new(Some(-1), "x")
+            .to_be_some_and(|v| *v > 0, "to be positive")
+            .is_err());
+    }
+
+    #[test]
+    fn to_be_some_and_negated() {
+        assert!(Expectation::new(Some(-1), "x")
+            .negate()
+            .to_be_some_and(|v| *v > 0, "to be positive")
+            .is_ok());
     }
 }

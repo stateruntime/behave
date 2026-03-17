@@ -47,10 +47,17 @@ pub struct MatchError {
     pub actual: String,
     /// Whether the expectation was negated with `.negate()`.
     pub negated: bool,
+    /// Source file where the expectation was created.
+    pub file: Option<&'static str>,
+    /// Source line where the expectation was created.
+    pub line: Option<u32>,
 }
 
 impl MatchError {
     /// Creates a new match error with the given details.
+    ///
+    /// Values for `actual` and `expected` are automatically truncated
+    /// when they exceed the internal 10 KB limit.
     ///
     /// # Examples
     ///
@@ -65,13 +72,38 @@ impl MatchError {
     /// );
     /// assert_eq!(err.expression, "x");
     /// ```
-    pub const fn new(expression: String, expected: String, actual: String, negated: bool) -> Self {
+    #[allow(clippy::needless_pass_by_value)]
+    pub fn new(expression: String, expected: String, actual: String, negated: bool) -> Self {
         Self {
             expression,
-            expected,
-            actual,
+            expected: truncate_value(&expected, TRUNCATE_MAX),
+            actual: truncate_value(&actual, TRUNCATE_MAX),
             negated,
+            file: None,
+            line: None,
         }
+    }
+
+    /// Returns a new error with source location attached.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use behave::MatchError;
+    ///
+    /// let err = MatchError::new(
+    ///     "x".to_string(),
+    ///     "true".to_string(),
+    ///     "false".to_string(),
+    ///     false,
+    /// ).with_location(Some("tests/my_test.rs"), Some(42));
+    /// assert_eq!(err.file, Some("tests/my_test.rs"));
+    /// ```
+    #[must_use]
+    pub const fn with_location(mut self, file: Option<&'static str>, line: Option<u32>) -> Self {
+        self.file = file;
+        self.line = line;
+        self
     }
 }
 
@@ -88,6 +120,30 @@ impl fmt::Display for MatchError {
     }
 }
 
+/// Default truncation limit in bytes (10 KB).
+const TRUNCATE_MAX: usize = 10_240;
+
+/// Truncates a string to at most `max` bytes, appending a suffix with
+/// the original size when truncation occurs.
+///
+/// Uses [`str::is_char_boundary`] to avoid splitting a multi-byte UTF-8
+/// character.
+fn truncate_value(s: &str, max: usize) -> String {
+    if s.len() <= max {
+        return s.to_string();
+    }
+    let total = s.len();
+    let mut end = max;
+    while !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!(
+        "{} [truncated at {}KB, total {total} bytes]",
+        &s[..end],
+        max / 1024
+    )
+}
+
 #[cfg(not(feature = "color"))]
 fn fmt_plain(f: &mut fmt::Formatter<'_>, err: &MatchError) -> fmt::Result {
     let negation = if err.negated { "not " } else { "" };
@@ -95,7 +151,15 @@ fn fmt_plain(f: &mut fmt::Formatter<'_>, err: &MatchError) -> fmt::Result {
         f,
         "expect!({})\n  actual: {}\nexpected: {}{}",
         err.expression, err.actual, negation, err.expected
-    )
+    )?;
+    fmt_location(f, err)
+}
+
+fn fmt_location(f: &mut fmt::Formatter<'_>, err: &MatchError) -> fmt::Result {
+    if let (Some(file), Some(line)) = (err.file, err.line) {
+        write!(f, "\n      at: {file}:{line}")?;
+    }
+    Ok(())
 }
 
 // --- color feature: structured diff with optional ANSI codes ---
@@ -135,20 +199,28 @@ fn is_multiline(actual: &str, expected: &str) -> bool {
 fn fmt_enhanced(f: &mut fmt::Formatter<'_>, err: &MatchError) -> fmt::Result {
     let colorize = should_colorize();
     if err.negated || !is_multiline(&err.actual, &err.expected) {
-        return fmt_single_line(f, err, colorize);
+        fmt_single_line(f, err, &err.actual, &err.expected, colorize)?;
+    } else {
+        fmt_diff_header(f, err, colorize)?;
+        fmt_diff_body(f, &err.actual, &err.expected, colorize)?;
     }
-    fmt_diff_header(f, err, colorize)?;
-    fmt_diff_body(f, &err.actual, &err.expected, colorize)
+    fmt_location(f, err)
 }
 
 #[cfg(feature = "color")]
-fn fmt_single_line(f: &mut fmt::Formatter<'_>, err: &MatchError, colorize: bool) -> fmt::Result {
+fn fmt_single_line(
+    f: &mut fmt::Formatter<'_>,
+    err: &MatchError,
+    actual: &str,
+    expected: &str,
+    colorize: bool,
+) -> fmt::Result {
     let (red, green, reset) = color_codes(colorize);
     let negation = if err.negated { "not " } else { "" };
     write!(
         f,
         "expect!({})\n  actual: {red}{}{reset}\nexpected: {}{green}{}{reset}",
-        err.expression, err.actual, negation, err.expected,
+        err.expression, actual, negation, expected,
     )
 }
 
@@ -238,6 +310,72 @@ mod tests {
     fn error_source_is_none() {
         let err = MatchError::new("x".to_string(), "a".to_string(), "b".to_string(), false);
         assert!(std::error::Error::source(&err).is_none());
+    }
+
+    // --- truncate_value ---
+
+    #[test]
+    fn truncate_under_limit() {
+        let s = "short";
+        assert_eq!(truncate_value(s, 100), "short");
+    }
+
+    #[test]
+    fn truncate_at_limit() {
+        let s = "exact";
+        assert_eq!(truncate_value(s, 5), "exact");
+    }
+
+    #[test]
+    fn truncate_over_limit() {
+        let s = "hello world";
+        let result = truncate_value(s, 5);
+        assert!(result.starts_with("hello"));
+        assert!(result.contains("[truncated at 0KB, total 11 bytes]"));
+    }
+
+    #[test]
+    fn truncate_multibyte_boundary() {
+        // Each emoji is 4 bytes. With a limit of 5, we can't fit a full
+        // second emoji, so truncation should back up to byte 4.
+        let s = "\u{1F600}\u{1F601}\u{1F602}"; // 12 bytes total
+        let result = truncate_value(s, 5);
+        assert!(result.starts_with('\u{1F600}'));
+        assert!(result.contains("[truncated at 0KB, total 12 bytes]"));
+    }
+
+    #[test]
+    fn truncate_suffix_derives_from_limit() {
+        let s = "a".repeat(TRUNCATE_MAX + 100);
+        let result = truncate_value(&s, TRUNCATE_MAX);
+        assert!(result.contains("[truncated at 10KB,"));
+    }
+
+    #[test]
+    fn new_truncates_large_values() {
+        let long = "x".repeat(TRUNCATE_MAX + 500);
+        let err = MatchError::new("e".to_string(), long.clone(), long, false);
+        assert!(err.actual.len() < TRUNCATE_MAX + 100);
+        assert!(err.expected.len() < TRUNCATE_MAX + 100);
+        assert!(err.actual.contains("[truncated"));
+        assert!(err.expected.contains("[truncated"));
+    }
+
+    #[test]
+    fn with_location_sets_fields() {
+        let err = MatchError::new("x".to_string(), "a".to_string(), "b".to_string(), false)
+            .with_location(Some("test.rs"), Some(42));
+        assert_eq!(err.file, Some("test.rs"));
+        assert_eq!(err.line, Some(42));
+    }
+
+    #[cfg(not(feature = "color"))]
+    #[test]
+    fn display_shows_location() {
+        let err = MatchError::new("x".to_string(), "a".to_string(), "b".to_string(), false)
+            .with_location(Some("test.rs"), Some(42));
+        let msg = err.to_string();
+        assert!(msg.contains("at: test.rs:42"));
     }
 
     #[cfg(feature = "color")]

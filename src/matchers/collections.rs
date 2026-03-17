@@ -5,7 +5,32 @@ use core::fmt::Debug;
 use crate::error::MatchError;
 use crate::expectation::Expectation;
 
-impl<T: Debug> Expectation<Vec<T>> {
+/// Trait abstracting over `Vec<T>` and `&[T]` for collection matchers.
+///
+/// This is an implementation detail — do not implement or rely on it.
+#[doc(hidden)]
+pub trait CollectionLike: Debug {
+    /// The element type.
+    type Item: Debug;
+    /// View the collection as a slice.
+    fn __behave_as_slice(&self) -> &[Self::Item];
+}
+
+impl<T: Debug> CollectionLike for Vec<T> {
+    type Item = T;
+    fn __behave_as_slice(&self) -> &[T] {
+        self
+    }
+}
+
+impl<T: Debug> CollectionLike for &[T] {
+    type Item = T;
+    fn __behave_as_slice(&self) -> &[T] {
+        self
+    }
+}
+
+impl<C: CollectionLike> Expectation<C> {
     /// Asserts the collection is empty.
     ///
     /// # Errors
@@ -18,11 +43,13 @@ impl<T: Debug> Expectation<Vec<T>> {
     /// use behave::Expectation;
     ///
     /// let v: Vec<i32> = vec![];
-    /// let result = Expectation::new(v, "v").to_be_empty();
-    /// assert!(result.is_ok());
+    /// assert!(Expectation::new(v, "v").to_be_empty().is_ok());
+    ///
+    /// let s: &[i32] = &[];
+    /// assert!(Expectation::new(s, "s").to_be_empty().is_ok());
     /// ```
     pub fn to_be_empty(&self) -> Result<(), MatchError> {
-        self.check(self.value().is_empty(), "to be empty")
+        self.check(self.value().__behave_as_slice().is_empty(), "to be empty")
     }
 
     /// Asserts the collection is not empty.
@@ -36,11 +63,16 @@ impl<T: Debug> Expectation<Vec<T>> {
     /// ```
     /// use behave::Expectation;
     ///
-    /// let result = Expectation::new(vec![1], "v").to_not_be_empty();
-    /// assert!(result.is_ok());
+    /// assert!(Expectation::new(vec![1], "v").to_not_be_empty().is_ok());
+    ///
+    /// let s: &[i32] = &[1];
+    /// assert!(Expectation::new(s, "s").to_not_be_empty().is_ok());
     /// ```
     pub fn to_not_be_empty(&self) -> Result<(), MatchError> {
-        self.check(!self.value().is_empty(), "to not be empty")
+        self.check(
+            !self.value().__behave_as_slice().is_empty(),
+            "to not be empty",
+        )
     }
 
     /// Asserts the collection has exactly the given length.
@@ -54,16 +86,102 @@ impl<T: Debug> Expectation<Vec<T>> {
     /// ```
     /// use behave::Expectation;
     ///
-    /// let result = Expectation::new(vec![1, 2, 3], "v").to_have_length(3);
-    /// assert!(result.is_ok());
+    /// assert!(Expectation::new(vec![1, 2, 3], "v").to_have_length(3).is_ok());
+    ///
+    /// let s: &[i32] = &[1, 2, 3];
+    /// assert!(Expectation::new(s, "s").to_have_length(3).is_ok());
     /// ```
     pub fn to_have_length(&self, expected: usize) -> Result<(), MatchError> {
-        let actual_len = self.value().len();
+        let actual_len = self.value().__behave_as_slice().len();
         self.check(actual_len == expected, format!("to have length {expected}"))
+    }
+
+    /// Asserts every element in the collection satisfies the predicate.
+    ///
+    /// Returns `Ok` for an empty collection (vacuous truth).
+    /// The `desc` argument appears in failure messages.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MatchError`] if any element fails the predicate.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use behave::Expectation;
+    ///
+    /// assert!(Expectation::new(vec![2, 4, 6], "v")
+    ///     .to_all_satisfy(|x| x % 2 == 0, "to be even")
+    ///     .is_ok());
+    /// ```
+    pub fn to_all_satisfy(
+        &self,
+        f: impl Fn(&C::Item) -> bool,
+        desc: &str,
+    ) -> Result<(), MatchError> {
+        let is_match = self.value().__behave_as_slice().iter().all(&f);
+        self.check(is_match, format!("all elements {desc}"))
+    }
+
+    /// Asserts at least one element satisfies the predicate.
+    ///
+    /// Returns `Err` for an empty collection.
+    /// The `desc` argument appears in failure messages.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MatchError`] if no element satisfies the predicate.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use behave::Expectation;
+    ///
+    /// assert!(Expectation::new(vec![1, 2, 3], "v")
+    ///     .to_any_satisfy(|x| x % 2 == 0, "to be even")
+    ///     .is_ok());
+    /// ```
+    pub fn to_any_satisfy(
+        &self,
+        f: impl Fn(&C::Item) -> bool,
+        desc: &str,
+    ) -> Result<(), MatchError> {
+        let is_match = self.value().__behave_as_slice().iter().any(&f);
+        self.check(is_match, format!("any element {desc}"))
+    }
+
+    /// Asserts no element satisfies the predicate.
+    ///
+    /// Returns `Ok` for an empty collection (vacuous truth).
+    /// The `desc` argument appears in failure messages.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MatchError`] if any element satisfies the predicate.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use behave::Expectation;
+    ///
+    /// assert!(Expectation::new(vec![1, 3, 5], "v")
+    ///     .to_none_satisfy(|x| x % 2 == 0, "to be even")
+    ///     .is_ok());
+    /// ```
+    pub fn to_none_satisfy(
+        &self,
+        f: impl Fn(&C::Item) -> bool,
+        desc: &str,
+    ) -> Result<(), MatchError> {
+        let is_match = !self.value().__behave_as_slice().iter().any(&f);
+        self.check(is_match, format!("no element {desc}"))
     }
 }
 
-impl<T: Debug + PartialEq> Expectation<Vec<T>> {
+impl<C: CollectionLike> Expectation<C>
+where
+    C::Item: PartialEq,
+{
     /// Asserts the collection contains the given element.
     ///
     /// For checking that *all* of several elements are present, use
@@ -84,12 +202,14 @@ impl<T: Debug + PartialEq> Expectation<Vec<T>> {
     /// ```
     /// use behave::Expectation;
     ///
-    /// let result = Expectation::new(vec![1, 2, 3], "v").to_contain(2);
-    /// assert!(result.is_ok());
+    /// assert!(Expectation::new(vec![1, 2, 3], "v").to_contain(2).is_ok());
+    ///
+    /// let s: &[i32] = &[1, 2, 3];
+    /// assert!(Expectation::new(s, "s").to_contain(2).is_ok());
     /// ```
     #[allow(clippy::needless_pass_by_value)]
-    pub fn to_contain(&self, element: T) -> Result<(), MatchError> {
-        let is_match = self.value().contains(&element);
+    pub fn to_contain(&self, element: C::Item) -> Result<(), MatchError> {
+        let is_match = self.value().__behave_as_slice().contains(&element);
         self.check(is_match, format!("to contain {element:?}"))
     }
 
@@ -106,118 +226,39 @@ impl<T: Debug + PartialEq> Expectation<Vec<T>> {
     /// ```
     /// use behave::Expectation;
     ///
-    /// let result = Expectation::new(vec![1, 2, 3], "v")
-    ///     .to_contain_all_of(&[1, 3]);
-    /// assert!(result.is_ok());
+    /// assert!(Expectation::new(vec![1, 2, 3], "v")
+    ///     .to_contain_all_of(&[1, 3])
+    ///     .is_ok());
     /// ```
-    pub fn to_contain_all_of(&self, elements: &[T]) -> Result<(), MatchError> {
-        let is_match = elements.iter().all(|e| self.value().contains(e));
+    pub fn to_contain_all_of(&self, elements: &[C::Item]) -> Result<(), MatchError> {
+        let is_match = elements
+            .iter()
+            .all(|e| self.value().__behave_as_slice().contains(e));
         self.check(is_match, format!("to contain all of {elements:?}"))
     }
-}
 
-impl<T: Debug> Expectation<&[T]> {
-    /// Asserts the slice is empty.
+    /// Asserts the collection contains at least one of the given elements.
+    ///
+    /// Returns `Err` when `elements` is empty (no element could match).
     ///
     /// # Errors
     ///
-    /// Returns [`MatchError`] if the slice is not empty (or empty when negated).
+    /// Returns [`MatchError`] if none of the elements are found.
     ///
     /// # Examples
     ///
     /// ```
     /// use behave::Expectation;
     ///
-    /// let s: &[i32] = &[];
-    /// let result = Expectation::new(s, "s").to_be_empty();
-    /// assert!(result.is_ok());
+    /// assert!(Expectation::new(vec![1, 2, 3], "v")
+    ///     .to_contain_any_of(&[9, 2])
+    ///     .is_ok());
     /// ```
-    pub fn to_be_empty(&self) -> Result<(), MatchError> {
-        self.check(self.value().is_empty(), "to be empty")
-    }
-
-    /// Asserts the slice is not empty.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`MatchError`] if the slice is empty.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use behave::Expectation;
-    ///
-    /// let s: &[i32] = &[1];
-    /// let result = Expectation::new(s, "s").to_not_be_empty();
-    /// assert!(result.is_ok());
-    /// ```
-    pub fn to_not_be_empty(&self) -> Result<(), MatchError> {
-        self.check(!self.value().is_empty(), "to not be empty")
-    }
-
-    /// Asserts the slice has exactly the given length.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`MatchError`] if the length does not match.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use behave::Expectation;
-    ///
-    /// let s: &[i32] = &[1, 2, 3];
-    /// let result = Expectation::new(s, "s").to_have_length(3);
-    /// assert!(result.is_ok());
-    /// ```
-    pub fn to_have_length(&self, expected: usize) -> Result<(), MatchError> {
-        let actual_len = self.value().len();
-        self.check(actual_len == expected, format!("to have length {expected}"))
-    }
-}
-
-impl<T: Debug + PartialEq> Expectation<&[T]> {
-    /// Asserts the slice contains the given element.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`MatchError`] if the element is not found.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use behave::Expectation;
-    ///
-    /// let s: &[i32] = &[1, 2, 3];
-    /// let result = Expectation::new(s, "s").to_contain(2);
-    /// assert!(result.is_ok());
-    /// ```
-    #[allow(clippy::needless_pass_by_value)]
-    pub fn to_contain(&self, element: T) -> Result<(), MatchError> {
-        let is_match = self.value().contains(&element);
-        self.check(is_match, format!("to contain {element:?}"))
-    }
-
-    /// Asserts the slice contains all of the given elements.
-    ///
-    /// Returns `Ok` when `elements` is empty (vacuous truth).
-    ///
-    /// # Errors
-    ///
-    /// Returns [`MatchError`] if any element is missing.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use behave::Expectation;
-    ///
-    /// let s: &[i32] = &[1, 2, 3];
-    /// let result = Expectation::new(s, "s").to_contain_all_of(&[1, 3]);
-    /// assert!(result.is_ok());
-    /// ```
-    pub fn to_contain_all_of(&self, elements: &[T]) -> Result<(), MatchError> {
-        let is_match = elements.iter().all(|e| self.value().contains(e));
-        self.check(is_match, format!("to contain all of {elements:?}"))
+    pub fn to_contain_any_of(&self, elements: &[C::Item]) -> Result<(), MatchError> {
+        let is_match = elements
+            .iter()
+            .any(|e| self.value().__behave_as_slice().contains(e));
+        self.check(is_match, format!("to contain any of {elements:?}"))
     }
 }
 
@@ -377,5 +418,162 @@ mod tests {
     fn slice_to_contain_all_of_pass() {
         let s: &[i32] = &[1, 2, 3];
         assert!(Expectation::new(s, "s").to_contain_all_of(&[1, 3]).is_ok());
+    }
+
+    // --- to_all_satisfy ---
+
+    #[test]
+    fn vec_to_all_satisfy_pass() {
+        assert!(Expectation::new(vec![2, 4, 6], "v")
+            .to_all_satisfy(|x| x % 2 == 0, "to be even")
+            .is_ok());
+    }
+
+    #[test]
+    fn vec_to_all_satisfy_fail() {
+        assert!(Expectation::new(vec![2, 3, 6], "v")
+            .to_all_satisfy(|x| x % 2 == 0, "to be even")
+            .is_err());
+    }
+
+    #[test]
+    fn vec_to_all_satisfy_empty() {
+        let v: Vec<i32> = vec![];
+        assert!(Expectation::new(v, "v")
+            .to_all_satisfy(|x| x % 2 == 0, "to be even")
+            .is_ok());
+    }
+
+    #[test]
+    fn vec_to_all_satisfy_negated() {
+        assert!(Expectation::new(vec![2, 3, 6], "v")
+            .negate()
+            .to_all_satisfy(|x| x % 2 == 0, "to be even")
+            .is_ok());
+    }
+
+    // --- to_any_satisfy ---
+
+    #[test]
+    fn vec_to_any_satisfy_pass() {
+        assert!(Expectation::new(vec![1, 2, 3], "v")
+            .to_any_satisfy(|x| x % 2 == 0, "to be even")
+            .is_ok());
+    }
+
+    #[test]
+    fn vec_to_any_satisfy_fail() {
+        assert!(Expectation::new(vec![1, 3, 5], "v")
+            .to_any_satisfy(|x| x % 2 == 0, "to be even")
+            .is_err());
+    }
+
+    #[test]
+    fn vec_to_any_satisfy_negated() {
+        assert!(Expectation::new(vec![1, 3, 5], "v")
+            .negate()
+            .to_any_satisfy(|x| x % 2 == 0, "to be even")
+            .is_ok());
+    }
+
+    // --- to_none_satisfy ---
+
+    #[test]
+    fn vec_to_none_satisfy_pass() {
+        assert!(Expectation::new(vec![1, 3, 5], "v")
+            .to_none_satisfy(|x| x % 2 == 0, "to be even")
+            .is_ok());
+    }
+
+    #[test]
+    fn vec_to_none_satisfy_fail() {
+        assert!(Expectation::new(vec![1, 2, 5], "v")
+            .to_none_satisfy(|x| x % 2 == 0, "to be even")
+            .is_err());
+    }
+
+    #[test]
+    fn vec_to_none_satisfy_negated() {
+        assert!(Expectation::new(vec![1, 2, 5], "v")
+            .negate()
+            .to_none_satisfy(|x| x % 2 == 0, "to be even")
+            .is_ok());
+    }
+
+    // --- to_contain_any_of ---
+
+    #[test]
+    fn vec_to_contain_any_of_pass() {
+        assert!(Expectation::new(vec![1, 2, 3], "v")
+            .to_contain_any_of(&[9, 2])
+            .is_ok());
+    }
+
+    #[test]
+    fn vec_to_contain_any_of_fail() {
+        assert!(Expectation::new(vec![1, 2, 3], "v")
+            .to_contain_any_of(&[8, 9])
+            .is_err());
+    }
+
+    #[test]
+    fn vec_to_contain_any_of_empty() {
+        assert!(Expectation::new(vec![1, 2], "v")
+            .to_contain_any_of(&[])
+            .is_err());
+    }
+
+    #[test]
+    fn vec_to_contain_any_of_negated() {
+        assert!(Expectation::new(vec![1, 2, 3], "v")
+            .negate()
+            .to_contain_any_of(&[8, 9])
+            .is_ok());
+    }
+
+    // --- slice predicates ---
+
+    #[test]
+    fn slice_to_all_satisfy_pass() {
+        let s: &[i32] = &[2, 4, 6];
+        assert!(Expectation::new(s, "s")
+            .to_all_satisfy(|x| x % 2 == 0, "to be even")
+            .is_ok());
+    }
+
+    #[test]
+    fn slice_to_all_satisfy_fail() {
+        let s: &[i32] = &[2, 3, 6];
+        assert!(Expectation::new(s, "s")
+            .to_all_satisfy(|x| x % 2 == 0, "to be even")
+            .is_err());
+    }
+
+    #[test]
+    fn slice_to_any_satisfy_pass() {
+        let s: &[i32] = &[1, 2, 3];
+        assert!(Expectation::new(s, "s")
+            .to_any_satisfy(|x| x % 2 == 0, "to be even")
+            .is_ok());
+    }
+
+    #[test]
+    fn slice_to_none_satisfy_pass() {
+        let s: &[i32] = &[1, 3, 5];
+        assert!(Expectation::new(s, "s")
+            .to_none_satisfy(|x| x % 2 == 0, "to be even")
+            .is_ok());
+    }
+
+    #[test]
+    fn slice_to_contain_any_of_pass() {
+        let s: &[i32] = &[1, 2, 3];
+        assert!(Expectation::new(s, "s").to_contain_any_of(&[9, 2]).is_ok());
+    }
+
+    #[test]
+    fn slice_to_contain_any_of_fail() {
+        let s: &[i32] = &[1, 2, 3];
+        assert!(Expectation::new(s, "s").to_contain_any_of(&[8, 9]).is_err());
     }
 }

@@ -55,13 +55,11 @@ fn render_node<W: Write>(
     let connector = if is_last { "└─ " } else { "├─ " };
     let display_name = humanize_with_markers(node);
 
+    let rollup = worst_child_outcome(node);
+    let outcome = node.outcome.as_ref().or(rollup.as_ref());
+
     write!(ctx.writer, "{prefix}{connector}")?;
-    render_name_with_status(
-        ctx.writer,
-        &display_name,
-        node.outcome.as_ref(),
-        ctx.use_color,
-    )?;
+    render_name_with_status(ctx.writer, &display_name, outcome, ctx.use_color)?;
     writeln!(ctx.writer)?;
 
     let child_prefix = format!("{}{}", prefix, if is_last { "   " } else { "│  " });
@@ -89,6 +87,7 @@ fn render_name_with_status(
         TestOutcome::Fail => ("✗", Color::Red),
         TestOutcome::Ignored => ("○", Color::Yellow),
         TestOutcome::Skipped => ("⊘", Color::Cyan),
+        TestOutcome::Flaky => ("⚡", Color::Yellow),
     };
 
     if use_color {
@@ -104,7 +103,42 @@ fn render_name_with_status(
 }
 
 fn humanize(slug: &str) -> String {
-    slug.replace('_', " ")
+    let mut result = slug.replace('_', " ");
+    while result.contains("  ") {
+        result = result.replace("  ", " ");
+    }
+    result.trim().to_string()
+}
+
+fn worst_child_outcome(node: &TreeNode) -> Option<TestOutcome> {
+    let mut worst: Option<TestOutcome> = None;
+    for child in &node.children {
+        let child_outcome = child.outcome.clone().or_else(|| worst_child_outcome(child));
+        let Some(outcome) = child_outcome else {
+            continue;
+        };
+        worst = Some(match worst {
+            None => outcome,
+            Some(current) => {
+                if outcome_severity(&outcome) > outcome_severity(&current) {
+                    outcome
+                } else {
+                    current
+                }
+            }
+        });
+    }
+    worst
+}
+
+const fn outcome_severity(outcome: &TestOutcome) -> u8 {
+    match outcome {
+        TestOutcome::Pass => 0,
+        TestOutcome::Ignored => 1,
+        TestOutcome::Skipped => 2,
+        TestOutcome::Flaky => 3,
+        TestOutcome::Fail => 4,
+    }
 }
 
 fn humanize_with_markers(node: &TreeNode) -> String {
@@ -167,6 +201,9 @@ pub fn render_summary(
     if summary.skipped > 0 {
         write!(writer, ", {} skipped", summary.skipped)?;
     }
+    if summary.flaky > 0 {
+        write!(writer, ", {} flaky", summary.flaky)?;
+    }
     if summary.ignored > 0 {
         write!(writer, ", {} ignored", summary.ignored)?;
     }
@@ -198,6 +235,21 @@ mod tests {
     #[test]
     fn humanize_multiple_underscores() {
         assert_eq!(humanize("a_b_c_d"), "a b c d");
+    }
+
+    #[test]
+    fn humanize_double_underscores() {
+        assert_eq!(humanize("a__b"), "a b");
+    }
+
+    #[test]
+    fn humanize_leading_underscores() {
+        assert_eq!(humanize("__leading"), "leading");
+    }
+
+    #[test]
+    fn humanize_triple_underscores() {
+        assert_eq!(humanize("a___b"), "a b");
     }
 
     #[test]
@@ -356,6 +408,39 @@ mod tests {
         assert!(output.contains("✗"));
         assert!(output.contains("○"));
         assert!(output.contains("⊘"));
+    }
+
+    #[test]
+    fn group_rollup_shows_worst_child_outcome() {
+        let mut root = TreeNode::new_group("suite".to_string());
+        let mut pass = TreeNode::new_leaf("passing".to_string());
+        pass.outcome = Some(TestOutcome::Pass);
+        let mut fail = TreeNode::new_leaf("failing".to_string());
+        fail.outcome = Some(TestOutcome::Fail);
+        root.children.push(pass);
+        root.children.push(fail);
+
+        let mut buf = Vec::new();
+        render_tree(&mut buf, &[root], false).ok();
+        let output = String::from_utf8(buf).unwrap_or_default();
+        // Group line should show the fail symbol from rollup
+        assert!(output.contains("✗ suite"));
+    }
+
+    #[test]
+    fn group_rollup_pass_when_all_pass() {
+        let mut root = TreeNode::new_group("suite".to_string());
+        let mut p1 = TreeNode::new_leaf("a".to_string());
+        p1.outcome = Some(TestOutcome::Pass);
+        let mut p2 = TreeNode::new_leaf("b".to_string());
+        p2.outcome = Some(TestOutcome::Pass);
+        root.children.push(p1);
+        root.children.push(p2);
+
+        let mut buf = Vec::new();
+        render_tree(&mut buf, &[root], false).ok();
+        let output = String::from_utf8(buf).unwrap_or_default();
+        assert!(output.contains("✓ suite"));
     }
 
     #[test]

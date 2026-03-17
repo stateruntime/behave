@@ -26,6 +26,8 @@ pub enum TestOutcome {
     Ignored,
     /// Test was skipped at runtime via `skip_when!`.
     Skipped,
+    /// Test initially failed but passed on retry.
+    Flaky,
 }
 
 /// A single parsed test result.
@@ -50,6 +52,10 @@ pub struct TestResult {
     pub outcome: TestOutcome,
     /// The skip reason, if the test was skipped via `skip_when!`.
     pub skip_reason: Option<String>,
+    /// Test duration in seconds (if available).
+    pub duration_secs: Option<f64>,
+    /// Captured failure message from test stdout (if any).
+    pub failure_message: Option<String>,
 }
 
 impl TestResult {
@@ -71,6 +77,8 @@ impl TestResult {
             full_name,
             outcome,
             skip_reason: None,
+            duration_secs: None,
+            failure_message: None,
         }
     }
 }
@@ -126,15 +134,60 @@ fn parse_test_line(line: &str) -> Option<TestResult> {
 /// ```
 pub fn reclassify_skipped(results: &mut [TestResult], stdout: &str) {
     let sentinels = extract_skip_sentinels(stdout);
+    let failures = extract_failure_messages(stdout);
     for result in results {
-        if result.outcome != TestOutcome::Pass {
-            continue;
+        if result.outcome == TestOutcome::Pass {
+            if let Some(reason) = sentinels.get(result.full_name.as_str()) {
+                result.outcome = TestOutcome::Skipped;
+                result.skip_reason = Some((*reason).to_string());
+            }
         }
-        if let Some(reason) = sentinels.get(result.full_name.as_str()) {
-            result.outcome = TestOutcome::Skipped;
-            result.skip_reason = Some((*reason).to_string());
+        if result.outcome == TestOutcome::Fail {
+            if let Some(msg) = failures.get(result.full_name.as_str()) {
+                result.failure_message = Some((*msg).to_string());
+            }
         }
     }
+}
+
+/// Extracts failure messages from `---- <name> stdout ----` blocks.
+fn extract_failure_messages(stdout: &str) -> std::collections::HashMap<&str, &str> {
+    let mut messages = std::collections::HashMap::new();
+    let lines: Vec<&str> = stdout.lines().collect();
+    let mut i = 0;
+    while i < lines.len() {
+        if let Some(name) = lines[i]
+            .strip_prefix("---- ")
+            .and_then(|rest| rest.strip_suffix(" stdout ----"))
+        {
+            let start = i + 1;
+            let mut end = start;
+            while end < lines.len()
+                && !lines[end].starts_with("---- ")
+                && !lines[end].starts_with("failures:")
+            {
+                end += 1;
+            }
+            if end > start {
+                let block = &stdout[line_offset(stdout, start)..line_offset(stdout, end)];
+                let trimmed = block.trim();
+                if !trimmed.is_empty() {
+                    messages.insert(name, trimmed);
+                }
+            }
+            i = end;
+        } else {
+            i += 1;
+        }
+    }
+    messages
+}
+
+fn line_offset(text: &str, line_idx: usize) -> usize {
+    text.lines()
+        .take(line_idx)
+        .map(|l| l.len() + 1) // +1 for newline
+        .sum()
 }
 
 /// Extracts `(test_name, reason)` pairs from `--show-output` stdout blocks.

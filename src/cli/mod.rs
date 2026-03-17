@@ -8,6 +8,7 @@
 pub mod config;
 pub mod context;
 pub mod error;
+pub mod filter;
 pub mod history;
 pub mod output;
 pub mod parser;

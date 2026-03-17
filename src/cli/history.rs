@@ -187,7 +187,7 @@ pub fn load_history(path: &Path) -> Result<TestHistory, CliError> {
         std::fs::read_to_string(path).map_err(|source| CliError::HistoryIo { source })?;
 
     serde_json::from_str(&contents).map_err(|err| CliError::HistoryIo {
-        source: std::io::Error::other(err.to_string()),
+        source: std::io::Error::new(std::io::ErrorKind::InvalidData, err),
     })
 }
 
@@ -215,7 +215,7 @@ pub fn save_history(path: &Path, history: &TestHistory) -> Result<(), CliError> 
     }
 
     let json = serde_json::to_string_pretty(history).map_err(|err| CliError::HistoryIo {
-        source: std::io::Error::other(err.to_string()),
+        source: std::io::Error::new(std::io::ErrorKind::InvalidData, err),
     })?;
 
     std::fs::write(path, json).map_err(|source| CliError::HistoryIo { source })
@@ -289,7 +289,7 @@ pub fn update_and_detect(
                 entry.last_outcome = "fail".to_string();
                 entry.source_hash = current_source_hash.to_string();
             }
-            TestOutcome::Ignored | TestOutcome::Skipped => {
+            TestOutcome::Ignored | TestOutcome::Skipped | TestOutcome::Flaky => {
                 entry.last_outcome = "ignored".to_string();
             }
         }

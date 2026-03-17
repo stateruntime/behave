@@ -12,9 +12,10 @@ use clap::{Parser, ValueEnum};
 use behave::cli::config::load_config;
 use behave::cli::context::{resolve_project_context, SelectedPackage};
 use behave::cli::error::CliError;
+use behave::cli::filter::parse_filter;
 use behave::cli::history::{hash_source, load_history, save_history, update_and_detect, FlakyTest};
 use behave::cli::output::{render_json, render_junit, Report, Summary};
-use behave::cli::parser::{parse_test_output, reclassify_skipped, TestResult};
+use behave::cli::parser::{parse_test_output, reclassify_skipped, TestOutcome, TestResult};
 use behave::cli::render::{render_summary, render_tree};
 use behave::cli::runner::{find_focused_tests, list_tests, run_cargo_test};
 use behave::cli::tree::build_tree;
@@ -33,7 +34,21 @@ enum OutputFormat {
 
 /// A BDD test runner for Rust.
 #[derive(Parser, Debug)]
-#[command(name = "cargo-behave", version, about)]
+#[command(
+    name = "cargo-behave",
+    version,
+    about,
+    after_help = "\
+Examples:
+  cargo behave                        Run all tests
+  cargo behave --tag slow             Run only tests tagged 'slow'
+  cargo behave --output json          Output JSON report
+  cargo behave --output junit         Output JUnit XML report
+  cargo behave --filter 'tag(a) and not tag(b)'
+  cargo behave --retry 2              Retry failed tests up to 2 times
+  cargo behave --watch                Re-run tests on file changes
+"
+)]
 #[allow(clippy::struct_excessive_bools)]
 struct Args {
     /// Subcommand name (always "behave" when invoked as `cargo behave`).
@@ -67,6 +82,14 @@ struct Args {
     /// Re-run tests on file changes.
     #[arg(long, conflicts_with = "fail_on_focus")]
     watch: bool,
+
+    /// Filter expression (e.g. `tag(slow) and not tag(flaky)`).
+    #[arg(long)]
+    filter: Option<String>,
+
+    /// Number of times to retry failed tests (default 0).
+    #[arg(long, default_value_t = 0)]
+    retry: u32,
 
     /// Extra arguments passed to `cargo test`.
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
@@ -105,8 +128,8 @@ fn run_watch(args: &Args) -> ExitCode {
     };
 
     let result = watch_loop(&cwd, || {
-        match run(args) {
-            Ok(_) | Err(_) => {}
+        if let Err(err) = run(args) {
+            eprintln!("error: {err}");
         }
         Ok(())
     });
@@ -167,6 +190,19 @@ fn run(args: &Args) -> Result<bool, CliError> {
         }
     }
 
+    // --filter: apply expression filter after tag filtering
+    if let Some(ref filter_str) = args.filter {
+        let filter_expr = parse_filter(filter_str)?;
+        report.tests.retain(|t| filter_expr.matches(&t.full_name));
+        report.summary = Summary::from_results(&report.tests);
+        report.tree = build_tree(&report.tests);
+    }
+
+    // --retry: re-run failed tests and reclassify as flaky
+    if args.retry > 0 {
+        retry_failed_tests(&mut report, &cargo_args, &test_args, args.retry)?;
+    }
+
     render_output(args, &report)?;
 
     if args.output == OutputFormat::Tree {
@@ -200,6 +236,78 @@ fn build_report(
         .with_stderr(stderr))
 }
 
+fn retry_failed_tests(
+    report: &mut Report,
+    cargo_args: &[&str],
+    test_args: &[&str],
+    max_retries: u32,
+) -> Result<(), CliError> {
+    for _ in 0..max_retries {
+        let failed: Vec<String> = collect_failed_names(&report.tests);
+        if failed.is_empty() {
+            break;
+        }
+        reclassify_retried_tests(report, &failed, cargo_args, test_args)?;
+    }
+    Ok(())
+}
+
+fn collect_failed_names(tests: &[TestResult]) -> Vec<String> {
+    tests
+        .iter()
+        .filter(|t| t.outcome == TestOutcome::Fail)
+        .map(|t| t.full_name.clone())
+        .collect()
+}
+
+fn escape_test_name(name: &str) -> String {
+    let mut escaped = String::with_capacity(name.len());
+    for ch in name.chars() {
+        if matches!(
+            ch,
+            '[' | ']' | '(' | ')' | '.' | '+' | '*' | '?' | '{' | '}' | '|' | '^' | '$' | '\\'
+        ) {
+            escaped.push('\\');
+        }
+        escaped.push(ch);
+    }
+    escaped
+}
+
+fn reclassify_retried_tests(
+    report: &mut Report,
+    failed: &[String],
+    cargo_args: &[&str],
+    test_args: &[&str],
+) -> Result<(), CliError> {
+    let filter = failed
+        .iter()
+        .map(|n| escape_test_name(n))
+        .collect::<Vec<_>>()
+        .join("|");
+    let mut retry_args = cargo_args.to_vec();
+    retry_args.push(&filter);
+    let retry_output = run_cargo_test(&retry_args, test_args)?;
+    let stdout = String::from_utf8_lossy(&retry_output.stdout);
+    let retry_results = parse_test_output(&stdout);
+
+    for result in &mut report.tests {
+        if result.outcome != TestOutcome::Fail {
+            continue;
+        }
+        let passed_retry = retry_results
+            .iter()
+            .any(|r| r.full_name == result.full_name && r.outcome == TestOutcome::Pass);
+        if passed_retry {
+            result.outcome = TestOutcome::Flaky;
+        }
+    }
+
+    report.summary = Summary::from_results(&report.tests);
+    report.tree = build_tree(&report.tests);
+    Ok(())
+}
+
 fn render_output(args: &Args, report: &Report) -> Result<(), CliError> {
     let mut out = std::io::stdout().lock();
 
@@ -221,7 +329,8 @@ fn render_tree_report(
         return Ok(());
     }
 
-    let use_color = !no_color && atty_stdout();
+    let no_color_env = std::env::var("NO_COLOR").is_ok();
+    let use_color = !no_color && !no_color_env && is_stdout_terminal();
     render_tree(writer, &report.tree, use_color).map_err(io_error)?;
     render_summary(writer, &report.summary, use_color).map_err(io_error)
 }
@@ -417,7 +526,7 @@ const fn io_error(source: std::io::Error) -> CliError {
     CliError::Io { source }
 }
 
-fn atty_stdout() -> bool {
+fn is_stdout_terminal() -> bool {
     std::io::stdout().is_terminal()
 }
 

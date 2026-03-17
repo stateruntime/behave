@@ -127,6 +127,35 @@ impl<T: AsRef<str> + core::fmt::Debug> Expectation<T> {
         let actual = self.value().as_ref().chars().count();
         self.check(actual == expected, format!("to have char count {expected}"))
     }
+
+    /// Asserts the string equals the expected string, ignoring ASCII case.
+    ///
+    /// Uses [`str::eq_ignore_ascii_case`], so only ASCII letters (`a`–`z`,
+    /// `A`–`Z`) are folded. Non-ASCII characters must match exactly.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MatchError`] if the strings differ after ASCII case folding.
+    ///
+    /// ```text
+    /// expect!(greeting)
+    ///   actual: "Hola"
+    /// expected: to equal ignoring case "hello"
+    /// ```
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use behave::Expectation;
+    ///
+    /// let result = Expectation::new("Hello World", "s")
+    ///     .to_equal_ignoring_case("hello world");
+    /// assert!(result.is_ok());
+    /// ```
+    pub fn to_equal_ignoring_case(&self, expected: &str) -> Result<(), MatchError> {
+        let is_match = self.value().as_ref().eq_ignore_ascii_case(expected);
+        self.check(is_match, format!("to equal ignoring case {expected:?}"))
+    }
 }
 
 impl Expectation<String> {
@@ -397,5 +426,36 @@ mod tests {
     #[test]
     fn str_to_be_empty_string_type() {
         assert!(Expectation::new(String::new(), "s").to_be_empty().is_ok());
+    }
+
+    // --- to_equal_ignoring_case ---
+
+    #[test]
+    fn to_equal_ignoring_case_pass() {
+        assert!(Expectation::new("Hello World", "s")
+            .to_equal_ignoring_case("hello world")
+            .is_ok());
+    }
+
+    #[test]
+    fn to_equal_ignoring_case_fail() {
+        assert!(Expectation::new("Hello", "s")
+            .to_equal_ignoring_case("world")
+            .is_err());
+    }
+
+    #[test]
+    fn to_equal_ignoring_case_negated() {
+        assert!(Expectation::new("Hello", "s")
+            .negate()
+            .to_equal_ignoring_case("world")
+            .is_ok());
+    }
+
+    #[test]
+    fn to_equal_ignoring_case_exact_match() {
+        assert!(Expectation::new("same", "s")
+            .to_equal_ignoring_case("same")
+            .is_ok());
     }
 }

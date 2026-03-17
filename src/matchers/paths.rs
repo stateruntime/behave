@@ -333,4 +333,66 @@ mod tests {
             .to_have_file_name("lib.rs")
             .is_ok());
     }
+
+    // --- &Path tests ---
+
+    #[test]
+    fn path_ref_to_exist_pass() {
+        let p = manifest_dir().join("Cargo.toml");
+        assert!(Expectation::new(p.as_path(), "p").to_exist().is_ok());
+    }
+
+    #[test]
+    fn path_ref_to_exist_fail() {
+        let p = manifest_dir().join("nonexistent_xyz");
+        assert!(Expectation::new(p.as_path(), "p").to_exist().is_err());
+    }
+
+    #[test]
+    fn path_ref_to_be_a_file_pass() {
+        let p = manifest_dir().join("Cargo.toml");
+        assert!(Expectation::new(p.as_path(), "p").to_be_a_file().is_ok());
+    }
+
+    #[test]
+    fn path_ref_to_be_a_file_fail() {
+        let p = manifest_dir().join("src");
+        assert!(Expectation::new(p.as_path(), "p").to_be_a_file().is_err());
+    }
+
+    #[test]
+    fn path_ref_to_be_a_directory_pass() {
+        let p = manifest_dir().join("src");
+        assert!(Expectation::new(p.as_path(), "p")
+            .to_be_a_directory()
+            .is_ok());
+    }
+
+    #[test]
+    fn path_ref_to_have_extension_pass() {
+        let p = std::path::Path::new("src/main.rs");
+        assert!(Expectation::new(p, "p").to_have_extension("rs").is_ok());
+    }
+
+    #[test]
+    fn path_ref_to_have_extension_fail() {
+        let p = std::path::Path::new("src/main.rs");
+        assert!(Expectation::new(p, "p").to_have_extension("txt").is_err());
+    }
+
+    #[test]
+    fn path_ref_to_have_file_name_pass() {
+        let p = std::path::Path::new("src/main.rs");
+        assert!(Expectation::new(p, "p")
+            .to_have_file_name("main.rs")
+            .is_ok());
+    }
+
+    #[test]
+    fn path_ref_to_have_file_name_fail() {
+        let p = std::path::Path::new("src/main.rs");
+        assert!(Expectation::new(p, "p")
+            .to_have_file_name("lib.rs")
+            .is_err());
+    }
 }

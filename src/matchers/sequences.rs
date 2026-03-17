@@ -104,6 +104,37 @@ impl<T: Debug + PartialEq> Expectation<Vec<T>> {
     }
 }
 
+impl<T: Debug> Expectation<Vec<T>> {
+    /// Asserts the vector is sorted by a key extraction function.
+    ///
+    /// The extracted keys must be in non-descending order.
+    /// An empty or single-element vector is considered sorted.
+    /// The `desc` argument appears in failure messages.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MatchError`] if any adjacent pair of keys is out of order.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use behave::Expectation;
+    ///
+    /// let result = Expectation::new(vec!["a", "bb", "ccc"], "v")
+    ///     .to_be_sorted_by_key(|s| s.len(), "by length");
+    /// assert!(result.is_ok());
+    /// ```
+    pub fn to_be_sorted_by_key<K: PartialOrd>(
+        &self,
+        f: impl Fn(&T) -> K,
+        desc: &str,
+    ) -> Result<(), MatchError> {
+        let keys: Vec<K> = self.value().iter().map(&f).collect();
+        let is_match = is_sorted_ascending(&keys);
+        self.check(is_match, format!("to be sorted {desc}"))
+    }
+}
+
 impl<T: Debug + PartialOrd> Expectation<Vec<T>> {
     /// Asserts the vector is sorted in non-descending order.
     ///
@@ -219,6 +250,38 @@ impl<T: Debug + PartialEq> Expectation<&[T]> {
     pub fn to_end_with_elements(&self, suffix: &[T]) -> Result<(), MatchError> {
         let is_match = self.value().ends_with(suffix);
         self.check(is_match, format!("to end with elements {suffix:?}"))
+    }
+}
+
+impl<T: Debug> Expectation<&[T]> {
+    /// Asserts the slice is sorted by a key extraction function.
+    ///
+    /// The extracted keys must be in non-descending order.
+    /// An empty or single-element slice is considered sorted.
+    /// The `desc` argument appears in failure messages.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MatchError`] if any adjacent pair of keys is out of order.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use behave::Expectation;
+    ///
+    /// let s: &[&str] = &["a", "bb", "ccc"];
+    /// let result = Expectation::new(s, "s")
+    ///     .to_be_sorted_by_key(|s| s.len(), "by length");
+    /// assert!(result.is_ok());
+    /// ```
+    pub fn to_be_sorted_by_key<K: PartialOrd>(
+        &self,
+        f: impl Fn(&T) -> K,
+        desc: &str,
+    ) -> Result<(), MatchError> {
+        let keys: Vec<K> = self.value().iter().map(&f).collect();
+        let is_match = is_sorted_ascending(&keys);
+        self.check(is_match, format!("to be sorted {desc}"))
     }
 }
 
@@ -474,5 +537,53 @@ mod tests {
     fn slice_to_be_sorted_fail() {
         let s: &[i32] = &[3, 1, 2];
         assert!(Expectation::new(s, "s").to_be_sorted().is_err());
+    }
+
+    // --- to_be_sorted_by_key ---
+
+    #[test]
+    fn vec_to_be_sorted_by_key_pass() {
+        assert!(Expectation::new(vec!["a", "bb", "ccc"], "v")
+            .to_be_sorted_by_key(|s| s.len(), "by length")
+            .is_ok());
+    }
+
+    #[test]
+    fn vec_to_be_sorted_by_key_fail() {
+        assert!(Expectation::new(vec!["ccc", "a", "bb"], "v")
+            .to_be_sorted_by_key(|s| s.len(), "by length")
+            .is_err());
+    }
+
+    #[test]
+    fn vec_to_be_sorted_by_key_empty() {
+        let v: Vec<&str> = vec![];
+        assert!(Expectation::new(v, "v")
+            .to_be_sorted_by_key(|s| s.len(), "by length")
+            .is_ok());
+    }
+
+    #[test]
+    fn vec_to_be_sorted_by_key_negated() {
+        assert!(Expectation::new(vec!["ccc", "a"], "v")
+            .negate()
+            .to_be_sorted_by_key(|s| s.len(), "by length")
+            .is_ok());
+    }
+
+    #[test]
+    fn slice_to_be_sorted_by_key_pass() {
+        let s: &[&str] = &["a", "bb", "ccc"];
+        assert!(Expectation::new(s, "s")
+            .to_be_sorted_by_key(|s| s.len(), "by length")
+            .is_ok());
+    }
+
+    #[test]
+    fn slice_to_be_sorted_by_key_fail() {
+        let s: &[&str] = &["ccc", "a"];
+        assert!(Expectation::new(s, "s")
+            .to_be_sorted_by_key(|s| s.len(), "by length")
+            .is_err());
     }
 }

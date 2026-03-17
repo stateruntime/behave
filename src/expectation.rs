@@ -31,6 +31,8 @@ pub struct Expectation<T> {
     pub expression: &'static str,
     /// Whether this expectation is negated.
     pub negated: bool,
+    file: Option<&'static str>,
+    line: Option<u32>,
 }
 
 impl<T> Expectation<T> {
@@ -49,6 +51,36 @@ impl<T> Expectation<T> {
             value,
             expression,
             negated: false,
+            file: None,
+            line: None,
+        }
+    }
+
+    /// Creates a new expectation with source location tracking.
+    ///
+    /// Prefer the [`expect!`](crate::expect) macro which calls this
+    /// automatically.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use behave::Expectation;
+    ///
+    /// let exp = Expectation::new_located(true, "true", "test.rs", 1);
+    /// assert!(!exp.negated);
+    /// ```
+    pub const fn new_located(
+        value: T,
+        expression: &'static str,
+        file: &'static str,
+        line: u32,
+    ) -> Self {
+        Self {
+            value,
+            expression,
+            negated: false,
+            file: Some(file),
+            line: Some(line),
         }
     }
 
@@ -69,6 +101,10 @@ impl<T> Expectation<T> {
     }
 
     /// Alias for [`negate`](Self::negate) for readability.
+    ///
+    /// **Note:** Double negation (`.not().not()`) cancels out and returns
+    /// the original pass/fail semantics. This is rarely what you want —
+    /// use a single `.not()` or omit it entirely.
     ///
     /// # Examples
     ///
@@ -95,6 +131,20 @@ impl<T> Expectation<T> {
     /// ```
     pub const fn value(&self) -> &T {
         &self.value
+    }
+
+    /// Consumes the expectation and returns the wrapped value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use behave::Expectation;
+    ///
+    /// let exp = Expectation::new(42, "42");
+    /// assert_eq!(exp.into_value(), 42);
+    /// ```
+    pub fn into_value(self) -> T {
+        self.value
     }
 }
 
@@ -130,7 +180,8 @@ impl<T: fmt::Debug> Expectation<T> {
             expected.to_string(),
             format!("{:?}", self.value()),
             self.negated,
-        ))
+        )
+        .with_location(self.file, self.line))
     }
 
     /// Asserts the value satisfies a predicate.
@@ -141,6 +192,7 @@ impl<T: fmt::Debug> Expectation<T> {
     ///
     /// The `description` appears in error messages using the standard
     /// "to ..." format (e.g. `"to be even"`, `"to be positive"`).
+    /// Any type implementing [`Display`](core::fmt::Display) is accepted.
     ///
     /// # Errors
     ///
@@ -164,7 +216,7 @@ impl<T: fmt::Debug> Expectation<T> {
     pub fn to_satisfy(
         &self,
         predicate: impl FnOnce(&T) -> bool,
-        description: &str,
+        description: impl fmt::Display,
     ) -> Result<(), MatchError> {
         self.check(predicate(self.value()), description)
     }
@@ -258,5 +310,27 @@ mod tests {
             .negate()
             .to_satisfy(|x| x % 2 != 0, "to be odd")
             .is_err());
+    }
+
+    #[test]
+    fn into_value_returns_inner() {
+        let exp = Expectation::new(42, "42");
+        assert_eq!(exp.into_value(), 42);
+    }
+
+    #[test]
+    fn new_located_sets_fields() {
+        let exp = Expectation::new_located(1, "1", "test.rs", 10);
+        assert_eq!(*exp.value(), 1);
+        assert_eq!(exp.expression, "1");
+        assert!(!exp.negated);
+    }
+
+    #[test]
+    fn to_satisfy_accepts_display_description() {
+        let desc = format!("to be divisible by {}", 3);
+        assert!(Expectation::new(9, "9")
+            .to_satisfy(|x| x % 3 == 0, desc)
+            .is_ok());
     }
 }

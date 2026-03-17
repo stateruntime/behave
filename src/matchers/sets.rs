@@ -449,4 +449,50 @@ mod tests {
         let sub: BTreeSet<i32> = [1, 2, 3].into_iter().collect();
         assert!(Expectation::new(s, "s").to_be_superset_of(&sub).is_err());
     }
+
+    // --- BTreeSet negation tests ---
+
+    #[test]
+    fn btreeset_to_contain_negated() {
+        let s: BTreeSet<i32> = [1, 2, 3].into_iter().collect();
+        assert!(Expectation::new(s, "s").negate().to_contain(&9).is_ok());
+    }
+
+    #[test]
+    fn btreeset_to_be_empty_negated() {
+        let s: BTreeSet<i32> = std::iter::once(1).collect();
+        assert!(Expectation::new(s, "s").negate().to_be_empty().is_ok());
+    }
+
+    #[test]
+    fn btreeset_to_not_be_empty_fail() {
+        let s: BTreeSet<i32> = BTreeSet::new();
+        assert!(Expectation::new(s, "s").to_not_be_empty().is_err());
+    }
+
+    #[test]
+    fn btreeset_to_have_length_fail() {
+        let s: BTreeSet<i32> = [1, 2].into_iter().collect();
+        assert!(Expectation::new(s, "s").to_have_length(5).is_err());
+    }
+
+    #[test]
+    fn btreeset_to_be_subset_of_negated() {
+        let s: BTreeSet<i32> = [1, 4].into_iter().collect();
+        let sup: BTreeSet<i32> = [1, 2, 3].into_iter().collect();
+        assert!(Expectation::new(s, "s")
+            .negate()
+            .to_be_subset_of(&sup)
+            .is_ok());
+    }
+
+    #[test]
+    fn btreeset_to_be_superset_of_negated() {
+        let s: BTreeSet<i32> = [1, 2].into_iter().collect();
+        let sub: BTreeSet<i32> = [1, 2, 3].into_iter().collect();
+        assert!(Expectation::new(s, "s")
+            .negate()
+            .to_be_superset_of(&sub)
+            .is_ok());
+    }
 }

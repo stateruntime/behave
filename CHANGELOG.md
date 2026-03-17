@@ -9,6 +9,79 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Truncation suffix derives from constant** — no longer hardcodes "10KB" in truncation message
+- **`expect_panic!` captures payload** — `expect_no_panic!` now shows panic message in error output
+- **`MatchError` auto-truncates** — `new()` applies truncation to `actual`/`expected` internally, fixing all code paths including `expect_match!`
+- **`to_satisfy` accepts `impl Display`** — description parameter is now generic instead of `&str`-only
+- **`not()` double-negation warning** — doc comment warns that `.not().not()` cancels out
+- **`into_value()` accessor** — `Expectation<T>` now provides `into_value(self) -> T`
+- **Collection matcher deduplication** — `Vec<T>` and `&[T]` impls consolidated via `CollectionLike` trait
+- **`humanize` collapses double underscores** — tree renderer no longer produces extra spaces from `__` in names
+- **Group outcome rollup** — CLI tree groups are colored by their worst child outcome
+- **JUnit `time` attribute** — testcase elements include `time="0.000"` for schema compliance
+- **XML control character stripping** — `escape_xml` removes illegal XML 1.0 control chars
+- **JSON output strips marker prefixes** — `__TAG_*__` and `__FOCUS__` prefixes removed from JSON report names
+- **Failure messages captured** — cargo test stdout blocks parsed and included in JUnit `<failure>` and JSON output
+- **Regex-safe retry filter** — `--retry` now escapes regex metacharacters in failed test names
+- **`NO_COLOR` environment variable** — respected alongside `--no-color` flag per no-color.org convention
+- **Watch loop error handling** — errors during `--watch` runs are printed to stderr instead of silently swallowed
+- **CLI `--help` examples** — `after_help` block shows common usage patterns
+- **`OutputParse` documented as reserved** — variant marked for future structured output parsers
+- **Error hints** — `CargoInvocation`, `ConfigParse`, `FilterParse`, `PackageSelection` errors include actionable hints
+- **History serde errors preserve source** — `load_history`/`save_history` use `ErrorKind::InvalidData` instead of losing the original error
+- **Filter quote support** — `tag("slow")` and `tag('slow')` strip surrounding quotes
+- **Filter error syntax hint** — parse errors include an example expression
+- **`atty_stdout` renamed** — renamed to `is_stdout_terminal` for clarity
+- **Source location tracking** — `MatchError` carries optional `file`/`line`; `expect!` macro captures `file!()`/`line!()`
+- **Removed `unreachable!()` in URL tests** — replaced with safe `process::abort()` fallback
+- **Negative test coverage** — 12 negative tests verify error message content for common matchers
+- **URL negative tests** — 5 tests verify error messages for URL matcher failures
+
+### Changed
+
+- **`MatchError::new()` is no longer `const fn`** — now applies auto-truncation internally, which requires allocation. This is unlikely to affect any code in practice since the `String` parameters cannot be constructed in const context.
+- **`CollectionLike` trait is `#[doc(hidden)]` public** — implementation detail used to deduplicate `Vec<T>` / `&[T]` matchers. Do not implement or rely on this trait; it may change without notice.
+- **Error display includes source location** — `MatchError` output now appends `at: file:line` when location info is present. Code that snapshot-tests or parses error messages may need updating.
+
+## [0.9.0] - 2026-03-14
+
+### Added
+
+- **Range matcher** — `to_be_between(low, high)` for inclusive range checks on `PartialOrd` types
+- **Case-insensitive string matcher** — `to_equal_ignoring_case(expected)` using ASCII case folding
+- **Option predicate** — `to_be_some_and(predicate, desc)` for asserting `Some(_)` values satisfy a condition
+- **Result predicates** — `to_be_ok_and(predicate, desc)` and `to_be_err_and(predicate, desc)` for value-level assertions
+- **Collection predicates** — quantifier-style matchers for `Vec<T>` and `&[T]`
+  - `to_all_satisfy(f, desc)` — all elements match
+  - `to_any_satisfy(f, desc)` — at least one matches
+  - `to_none_satisfy(f, desc)` — no elements match
+  - `to_contain_any_of(&[..])` — contains at least one of the given elements
+- **Sorted-by-key matcher** — `to_be_sorted_by_key(f, desc)` for sequences sorted by a derived key
+- **Display / Debug matchers** — new `display` module (no feature gate)
+  - `to_display_as(expected)` — `Display` output matches exactly
+  - `to_display_containing(substring)` — `Display` output contains substring
+  - `to_debug_containing(substring)` — `Debug` output contains substring
+- **Duration matchers** — new `duration` module *(requires `std` feature)*
+  - `to_be_shorter_than(bound)`, `to_be_longer_than(bound)`
+  - `to_be_close_to_duration(expected, tolerance)` — within absolute tolerance
+- **Error chain matchers** — new `error_chain` module *(requires `std` feature)*
+  - `to_have_source()` — error has a non-`None` source
+  - `to_have_source_containing(substring)` — source message contains text
+- **CLI filter expressions** — `cargo behave --filter 'tag(slow) and not tag(flaky)'`
+  - Boolean algebra: `and`, `or`, `not`, parenthesized grouping
+  - `tag(name)` matches tag-encoded test names, `name(pattern)` matches test path
+- **CLI retry on failure** — `cargo behave --retry N` re-runs failed tests up to N times
+  - Tests that fail then pass are reclassified as `Flaky` with `⚡` symbol in output
+  - Flaky counts shown in summary, JUnit, and JSON reports
+
+### Changed
+
+- **Value truncation** — assertion failure output now truncates values longer than 10KB
+  - Uses safe UTF-8 boundary detection
+  - Shows `[truncated at 10KB, total N bytes]` suffix
+
 ## [0.8.0] - 2026-03-13
 
 ### Added
@@ -236,7 +309,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `cargo-behave` now forces parseable libtest `pretty` output for report generation and reserves the libtest `--format` flag
 - JUnit output now strips internal `__FOCUS__` / `__PENDING__` prefixes from displayed test names
 
-[Unreleased]: https://github.com/stateruntime/behave/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/stateruntime/behave/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/stateruntime/behave/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/stateruntime/behave/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/stateruntime/behave/compare/v0.6.2...v0.7.0
 [0.6.2]: https://github.com/stateruntime/behave/compare/v0.6.1...v0.6.2

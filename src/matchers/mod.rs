@@ -14,13 +14,13 @@
 //! |--------|----------|----------|
 //! | `equality` | `to_equal`, `to_not_equal` | exact value equality matters |
 //! | `boolean` | `to_be_true`, `to_be_false` | the expression is already a predicate |
-//! | `ordering` | `to_be_greater_than`, `to_be_less_than`, `to_be_at_least`, `to_be_at_most` | bounds matter more than exact values |
-//! | `option` | `to_be_some`, `to_be_none`, `to_be_some_with` | asserting `Option` shape without manual matching |
-//! | `result` | `to_be_ok`, `to_be_err`, `to_be_ok_with`, `to_be_err_with` | asserting `Result` shape without manual matching |
-//! | `collections` | `to_contain`, `to_contain_all_of`, `to_be_empty`, `to_not_be_empty`, `to_have_length` | size and membership |
-//! | `strings` | `to_start_with`, `to_end_with`, `to_contain_substr`, `to_have_str_length`, `to_have_char_count`, `to_be_empty`, `to_not_be_empty` | text shape |
+//! | `ordering` | `to_be_greater_than`, `to_be_less_than`, `to_be_at_least`, `to_be_at_most`, `to_be_between` | bounds matter more than exact values |
+//! | `option` | `to_be_some`, `to_be_none`, `to_be_some_with`, `to_be_some_and` | asserting `Option` shape without manual matching |
+//! | `result` | `to_be_ok`, `to_be_err`, `to_be_ok_with`, `to_be_err_with`, `to_be_ok_and`, `to_be_err_and` | asserting `Result` shape without manual matching |
+//! | `collections` | `to_contain`, `to_contain_all_of`, `to_be_empty`, `to_not_be_empty`, `to_have_length`, `to_all_satisfy`, `to_any_satisfy`, `to_none_satisfy`, `to_contain_any_of` | size and membership |
+//! | `strings` | `to_start_with`, `to_end_with`, `to_contain_substr`, `to_have_str_length`, `to_have_char_count`, `to_be_empty`, `to_not_be_empty`, `to_equal_ignoring_case` | text shape |
 //! | `float` | `to_approximately_equal`, `to_approximately_equal_within`, `to_be_nan`, `to_be_finite`, `to_be_infinite`, `to_be_positive`, `to_be_negative` | float comparison and shape |
-//! | `sequences` | `to_contain_exactly`, `to_contain_exactly_in_any_order`, `to_start_with_elements`, `to_end_with_elements`, `to_be_sorted` | ordered sequence assertions |
+//! | `sequences` | `to_contain_exactly`, `to_contain_exactly_in_any_order`, `to_start_with_elements`, `to_end_with_elements`, `to_be_sorted`, `to_be_sorted_by_key` | ordered sequence assertions |
 //! | `regex` | `to_match_regex`, `to_contain_regex` | pattern matching *(requires `regex` feature)* |
 //! | `hashmap` | `to_contain_key`, `to_contain_value`, `to_contain_entry`, `to_be_empty`, `to_not_be_empty`, `to_have_length` | `HashMap` and `BTreeMap` assertions *(requires `std` feature)* |
 //! | `sets` | `to_contain`, `to_be_empty`, `to_not_be_empty`, `to_have_length`, `to_be_subset_of`, `to_be_superset_of` | `HashSet` and `BTreeSet` assertions *(requires `std` feature)* |
@@ -28,6 +28,9 @@
 //! | `json` | `to_have_field`, `to_have_field_value`, `to_be_json_superset_of` | JSON value assertions *(requires `json` feature)* |
 //! | `http` | `to_be_success`, `to_be_redirect`, `to_be_client_error`, `to_be_server_error`, `to_have_status_code`, `to_have_header`, `to_have_header_value` | HTTP assertions *(requires `http` feature)* |
 //! | `url_matchers` | `to_have_scheme`, `to_have_host`, `to_have_path`, `to_have_query_param`, `to_have_query_param_value`, `to_have_fragment` | URL assertions *(requires `url` feature)* |
+//! | `display` | `to_display_as`, `to_display_containing`, `to_debug_containing` | `Display` / `Debug` output assertions |
+//! | `duration` | `to_be_shorter_than`, `to_be_longer_than`, `to_be_close_to_duration` | `Duration` comparison *(requires `std` feature)* |
+//! | `error_chain` | `to_have_source`, `to_have_source_containing` | error source chain *(requires `std` feature)* |
 //!
 //! Additional matchers defined outside this module:
 //!
@@ -37,7 +40,12 @@
 
 mod boolean;
 mod collections;
+mod display;
+#[cfg(feature = "std")]
+mod duration;
 mod equality;
+#[cfg(feature = "std")]
+mod error_chain;
 mod float;
 #[cfg(feature = "std")]
 mod hashmap;

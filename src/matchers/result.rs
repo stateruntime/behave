@@ -54,6 +54,74 @@ impl<T: Debug, E: Debug> Expectation<Result<T, E>> {
     }
 }
 
+impl<T: Debug, E: Debug> Expectation<Result<T, E>> {
+    /// Asserts the result is `Ok` and the inner value satisfies a predicate.
+    ///
+    /// The `desc` argument appears in failure messages (e.g. `"to be positive"`).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MatchError`] if the result is `Err` or the predicate returns `false`.
+    ///
+    /// ```text
+    /// expect!(result)
+    ///   actual: Ok(0)
+    /// expected: to be Ok(_) and to be positive
+    /// ```
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use behave::Expectation;
+    ///
+    /// let val: Result<i32, &str> = Ok(42);
+    /// let result = Expectation::new(val, "x")
+    ///     .to_be_ok_and(|v| *v > 0, "to be positive");
+    /// assert!(result.is_ok());
+    /// ```
+    pub fn to_be_ok_and(
+        &self,
+        predicate: impl FnOnce(&T) -> bool,
+        desc: &str,
+    ) -> Result<(), MatchError> {
+        let is_match = self.value().as_ref().is_ok_and(predicate);
+        self.check(is_match, format!("to be Ok(_) and {desc}"))
+    }
+
+    /// Asserts the result is `Err` and the error value satisfies a predicate.
+    ///
+    /// The `desc` argument appears in failure messages (e.g. `"to contain 'timeout'"`).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MatchError`] if the result is `Ok` or the predicate returns `false`.
+    ///
+    /// ```text
+    /// expect!(result)
+    ///   actual: Err("unknown")
+    /// expected: to be Err(_) and to contain 'timeout'
+    /// ```
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use behave::Expectation;
+    ///
+    /// let val: Result<i32, String> = Err("timeout error".to_string());
+    /// let result = Expectation::new(val, "x")
+    ///     .to_be_err_and(|e| e.contains("timeout"), "to contain 'timeout'");
+    /// assert!(result.is_ok());
+    /// ```
+    pub fn to_be_err_and(
+        &self,
+        predicate: impl FnOnce(&E) -> bool,
+        desc: &str,
+    ) -> Result<(), MatchError> {
+        let is_match = self.value().as_ref().is_err_and(predicate);
+        self.check(is_match, format!("to be Err(_) and {desc}"))
+    }
+}
+
 impl<T: Debug + PartialEq, E: Debug> Expectation<Result<T, E>> {
     /// Asserts the result is `Ok` containing the expected value.
     ///
@@ -210,5 +278,75 @@ mod tests {
             .negate()
             .to_be_err_with("oops")
             .is_err());
+    }
+
+    // --- to_be_ok_and ---
+
+    #[test]
+    fn to_be_ok_and_pass() {
+        let val: Result<i32, &str> = Ok(42);
+        assert!(Expectation::new(val, "x")
+            .to_be_ok_and(|v| *v > 0, "to be positive")
+            .is_ok());
+    }
+
+    #[test]
+    fn to_be_ok_and_fail_err() {
+        let val: Result<i32, &str> = Err("e");
+        assert!(Expectation::new(val, "x")
+            .to_be_ok_and(|v| *v > 0, "to be positive")
+            .is_err());
+    }
+
+    #[test]
+    fn to_be_ok_and_fail_predicate() {
+        let val: Result<i32, &str> = Ok(-1);
+        assert!(Expectation::new(val, "x")
+            .to_be_ok_and(|v| *v > 0, "to be positive")
+            .is_err());
+    }
+
+    #[test]
+    fn to_be_ok_and_negated() {
+        let val: Result<i32, &str> = Ok(-1);
+        assert!(Expectation::new(val, "x")
+            .negate()
+            .to_be_ok_and(|v| *v > 0, "to be positive")
+            .is_ok());
+    }
+
+    // --- to_be_err_and ---
+
+    #[test]
+    fn to_be_err_and_pass() {
+        let val: Result<i32, String> = Err("timeout error".to_string());
+        assert!(Expectation::new(val, "x")
+            .to_be_err_and(|e| e.contains("timeout"), "to contain 'timeout'")
+            .is_ok());
+    }
+
+    #[test]
+    fn to_be_err_and_fail_ok() {
+        let val: Result<i32, String> = Ok(1);
+        assert!(Expectation::new(val, "x")
+            .to_be_err_and(|e| e.contains("timeout"), "to contain 'timeout'")
+            .is_err());
+    }
+
+    #[test]
+    fn to_be_err_and_fail_predicate() {
+        let val: Result<i32, String> = Err("other error".to_string());
+        assert!(Expectation::new(val, "x")
+            .to_be_err_and(|e| e.contains("timeout"), "to contain 'timeout'")
+            .is_err());
+    }
+
+    #[test]
+    fn to_be_err_and_negated() {
+        let val: Result<i32, String> = Err("other".to_string());
+        assert!(Expectation::new(val, "x")
+            .negate()
+            .to_be_err_and(|e| e.contains("timeout"), "to contain 'timeout'")
+            .is_ok());
     }
 }
