@@ -35,7 +35,7 @@ json_output="${TMP_DIR}/fixture-report.json"
 
 grep -q '"command_success": true' "${json_output}"
 grep -q '"total": 2' "${json_output}"
-grep -q '"full_name": "checkout::__FOCUS__alpha_case"' "${json_output}"
+grep -q '"full_name": "checkout::alpha_case"' "${json_output}"
 grep -q '"full_name": "checkout::zeta_case"' "${json_output}"
 grep -q '"name": "alpha_case"' "${json_output}"
 grep -q '"focused": true' "${json_output}"
@@ -45,7 +45,7 @@ if grep -q 'pricing::other_package_case' "${json_output}"; then
   exit 1
 fi
 
-alpha_line="$(grep -n '"full_name": "checkout::__FOCUS__alpha_case"' "${json_output}" | cut -d: -f1)"
+alpha_line="$(grep -n '"full_name": "checkout::alpha_case"' "${json_output}" | cut -d: -f1)"
 zeta_line="$(grep -n '"full_name": "checkout::zeta_case"' "${json_output}" | cut -d: -f1)"
 
 if [ "${alpha_line}" -ge "${zeta_line}" ]; then
