@@ -98,9 +98,9 @@ impl Expectation<Duration> {
 /// Absolute difference between two durations using saturating subtraction.
 fn abs_diff(a: Duration, b: Duration) -> Duration {
     if a >= b {
-        a - b
+        a.saturating_sub(b)
     } else {
-        b - a
+        b.saturating_sub(a)
     }
 }
 

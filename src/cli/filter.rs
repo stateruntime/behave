@@ -30,11 +30,11 @@ pub enum FilterExpr {
     /// Matches tests whose full name contains the substring.
     Name(String),
     /// Both sides must match.
-    And(Box<FilterExpr>, Box<FilterExpr>),
+    And(Box<Self>, Box<Self>),
     /// At least one side must match.
-    Or(Box<FilterExpr>, Box<FilterExpr>),
+    Or(Box<Self>, Box<Self>),
     /// Inverts the inner expression.
-    Not(Box<FilterExpr>),
+    Not(Box<Self>),
 }
 
 impl FilterExpr {

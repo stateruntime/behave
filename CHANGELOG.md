@@ -9,8 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-03-17
+
 ### Fixed
 
+- **Clippy 1.94 compatibility** — use `saturating_sub` for `Duration` arithmetic (`unchecked_time_subtraction` lint) and `Self` in enum variants (`use_self` lint)
 - **Truncation suffix derives from constant** — no longer hardcodes "10KB" in truncation message
 - **`expect_panic!` captures payload** — `expect_no_panic!` now shows panic message in error output
 - **`MatchError` auto-truncates** — `new()` applies truncation to `actual`/`expected` internally, fixing all code paths including `expect_match!`

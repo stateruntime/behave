@@ -1,6 +1,6 @@
 [package]
 name = "behave-macros"
-version = "0.9.0"
+version = "0.9.1"
 authors = ["Jan Piotrzkowski <https://github.com/babilonczyk>", "State Runtime <https://github.com/stateruntime>"]
 edition = "2021"
 rust-version = "1.75"
